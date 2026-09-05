@@ -1,7 +1,7 @@
 import streamlit as st
 
 from config import APP_TITLE
-from services.auth_service import init_auth_session, render_login_sidebar, render_sidebar_history
+from auth_service import init_auth_session, render_login_sidebar, render_sidebar_history
 
 st.set_page_config(
     page_title=APP_TITLE,
@@ -36,10 +36,10 @@ if not st.session_state.get("authenticated"):
 render_sidebar_history()
 
 pages = [
-    st.Page("pages/sop1_breakdown.py", title="爆款拆解", icon="🎬", default=True),
-    st.Page("pages/sop2_compare.py", title="爆款对比", icon="🆚"),
-    st.Page("pages/review.py", title="数据复盘", icon="📊"),
-    st.Page("pages/history.py", title="历史记录", icon="🗂️"),
+    st.Page("sop1_breakdown.py", title="爆款拆解", icon="🎬", default=True),
+    st.Page("sop2_compare.py", title="爆款对比", icon="🆚"),
+    st.Page("review_page.py", title="数据复盘", icon="📊"),
+    st.Page("history_page.py", title="历史记录", icon="🗂️"),
 ]
 
 pg = st.navigation(pages, position="top")
