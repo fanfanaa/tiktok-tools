@@ -102,7 +102,7 @@ PRODUCT_CATEGORIES = [
     "家居收纳 / Home Organization",
     "个人护理 / Personal Care",
     "便携小工具 / Portable Gadgets",
-    "其他",
+    "其他 / 自定义",
 ]
 
 TRAFFIC_TYPES = [
