@@ -16,6 +16,7 @@ def _init_state():
     defaults = {
         "sop2_pre_result": None,
         "sop2_pre_meta": {},
+        "sop2_pre_completed_at": "",
         "sop2_upload_signature": "",
         "sop2_selected_viral": None,
         "sop2_selected_own": None,
@@ -68,6 +69,7 @@ if viral_videos or own_videos:
     if st.session_state["sop2_upload_signature"] != sig:
         st.session_state["sop2_upload_signature"] = sig
         st.session_state["sop2_pre_result"] = None
+        st.session_state["sop2_pre_completed_at"] = ""
         st.session_state["sop2_selected_viral"] = None
         st.session_state["sop2_selected_own"] = None
         st.session_state["sop2_deep_result"] = None
@@ -79,12 +81,21 @@ invalid = (
     len(own_videos or []) > SOP2_MAX_OWN_VIDEOS
 )
 
-if st.button("快速对比预分析", type="primary", use_container_width=True, disabled=(client is None or invalid), key="sop2_pre_btn"):
+pre_done = st.session_state.get("sop2_pre_result") is not None
+pre_button_label = "重新分析" if pre_done else "快速对比预分析"
+pre_button_type = "secondary" if pre_done else "primary"
+
+if pre_done:
+    completed_at = st.session_state.get("sop2_pre_completed_at", "")
+    st.caption(f"✅ 预分析已完成{(' · ' + completed_at) if completed_at else ''}。如需重新跑一次，可点击下方“重新分析”。")
+
+if st.button(pre_button_label, type=pre_button_type, use_container_width=True, disabled=(client is None or invalid), key="sop2_pre_btn"):
     try:
         with st.spinner("Gemini 3.8 Flash 正在逐条预分析，并推荐最值得比较的组合…"):
             result, meta = pre_analyze(client, viral_videos, own_videos, category, product_name, user_points)
         st.session_state["sop2_pre_result"] = result
         st.session_state["sop2_pre_meta"] = meta
+        st.session_state["sop2_pre_completed_at"] = datetime.now().strftime("%H:%M")
         st.session_state["sop2_selected_viral"] = None
         st.session_state["sop2_selected_own"] = None
         st.session_state["sop2_deep_result"] = None
@@ -96,7 +107,7 @@ if st.button("快速对比预分析", type="primary", use_container_width=True, 
             "fallback_used":meta.get("fallback_used",""), "retry_count":meta.get("retry_count",""), "analysis_seconds":meta.get("analysis_seconds",""),
             "full_output_json":json_dumps(result),
         })
-        st.success("预分析完成。AI已给推荐，但最终比较对象由你选择。")
+        st.rerun()
     except Exception as exc:
         st.error(friendly_error(exc))
 
