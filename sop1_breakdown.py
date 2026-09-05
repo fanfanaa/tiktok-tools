@@ -55,12 +55,11 @@ with c1:
 
 with c2:
 
-    category_choice = (
-        st.selectbox(
-            "产品品类",
-            PRODUCT_CATEGORIES,
-            key="analysis_category",
-        )
+    category_mode = st.radio(
+        "产品品类",
+        ["选择现有品类", "自定义输入"],
+        horizontal=True,
+        key="analysis_category_mode",
     )
 
 with c3:
@@ -73,15 +72,20 @@ with c3:
         )
     )
 
-if category_choice == "其他 / 自定义":
+normal_categories = [x for x in PRODUCT_CATEGORIES if x != "其他 / 自定义"]
+if category_mode == "自定义输入":
     custom_category = st.text_input(
         "自定义产品品类",
         key="analysis_custom_category",
-        placeholder="例如：LED阅读灯 / Flat Panel Book Light",
+        placeholder="直接输入，例如：LED阅读灯 / Flat Panel Book Light",
     )
-    category = clean_text(custom_category) or "其他 / 自定义"
+    category = clean_text(custom_category) or "自定义品类（未填写）"
 else:
-    category = category_choice
+    category = st.selectbox(
+        "选择现有产品品类",
+        normal_categories,
+        key="analysis_category_select",
+    )
 
 input_selling_points = (
     st.text_area(
