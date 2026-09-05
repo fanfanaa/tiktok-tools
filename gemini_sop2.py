@@ -15,7 +15,25 @@ from gemini_base import generate_resilient as _base_generate_resilient, wait_unt
 
 
 def _run(client, contents, config):
-    return _base_generate_resilient(client, contents, config, model_chain=SOP2_MODEL_CHAIN)
+    """SOP2 专用调用包装。
+
+    不修改 SOP1 的公共 Gemini 逻辑。若公共重试器把真实模型异常包装成
+    RuntimeError，这里恢复原始 cause，并把真实错误写入 Streamlit Cloud Logs。
+    """
+    try:
+        return _base_generate_resilient(
+            client,
+            contents,
+            config,
+            model_chain=SOP2_MODEL_CHAIN,
+        )
+    except Exception as exc:
+        raw_exc = getattr(exc, "__cause__", None) or exc
+        print(
+            f"[SOP2 Gemini RAW ERROR] type={type(raw_exc).__name__} error={raw_exc}",
+            flush=True,
+        )
+        raise raw_exc
 
 
 def _thinking(level):
