@@ -1,85 +1,86 @@
-# TikTok Tools Flat Modular Deployment
+# TikTok爆款视频解析&复盘专用｜平铺模块化部署版
 
-这是与原模块化版本功能一致的“平铺多文件”部署版，专门用于 GitHub 网页一次性上传。
+当前线上版本采用 **一个 Streamlit 网站 + 根目录平铺多文件** 的结构。
 
-- 一个网站
-- SOP1 / SOP2 / 数据复盘 / 历史记录分别独立文件
-- 不需要 pages/services/schemas 文件夹
-- app.py 仅负责登录和顶部导航
-
-上传时把本目录内全部文件直接上传到 modular-sop2 分支根目录即可。
-
-# TikTok 爆款视频解析&复盘专用｜模块化部署版
-
-## 这版做了什么
-
-这是从你当前线上稳定版拆出来的模块化版本：
-
-- `爆款拆解`：SOP1，继续使用原有 Gemini 3.5 模型链与原有业务流程。
+- `爆款拆解`：SOP1，独立业务文件与独立 Gemini 调用文件。
 - `爆款对比`：SOP2，独立使用 `gemini-3.8-flash`，不回退到 SOP1 模型。
-- `数据复盘`：从原 `app.py` 独立出来。
-- `历史记录`：统一入口，仍按主账号/分账号权限查看。
+- `数据复盘`：独立页面与独立 Gemini 调用文件。
+- `历史记录`：统一入口，按主账号/分账号权限查看；已支持 Supabase 持久化兼容。
+- `app.py` 只负责页面配置、登录与顶部导航。
 
-页面、Gemini 服务、Schema 已分开。以后改 SOP1 主要只动 SOP1 文件；改 SOP2 主要只动 SOP2 文件。
+这样以后修改 SOP1 或 SOP2 时，优先只改各自文件，不需要反复重写整个 `app.py`。
 
 ---
 
-## GitHub 部署步骤
-
-### 1. 先备份现在线上稳定版
-
-在 GitHub 当前仓库创建一个分支，例如：
-
-`backup-v1-stable`
-
-这个分支先不要改。
-
-### 2. 把本压缩包解压后的“文件内容”上传到现有仓库根目录
-
-根目录最终应该看到：
+## 当前 GitHub 根目录结构
 
 ```text
 app.py
 config.py
 requirements.txt
-pages/
-services/
-schemas/
-.streamlit/
+
+auth_service.py
+common.py
+history_service.py
+export_service.py
+
+gemini_base.py
+gemini_sop1.py
+gemini_sop2.py
+gemini_review.py
+
+sop1_breakdown.py
+sop1_schema.py
+sop2_compare.py
+sop2_schema.py
+review_page.py
+review_schema.py
+review_utils.py
+history_page.py
+
+README_DEPLOY.md
+.devcontainer/
 ```
 
-注意：不要把最外层 `tiktok_tools_modular/` 再套一层上传，否则 Streamlit Cloud 会找不到根目录的 `app.py`。
+> 当前版本 **不使用** `pages/`、`services/`、`schemas/` 三层文件夹。所有 Python 模块都直接放在仓库根目录，避免 GitHub 网页上传时目录错位导致 Streamlit 找不到模块。
 
-### 3. 覆盖原文件
+---
 
-- 用新 `app.py` 覆盖旧 `app.py`
-- 用新 `requirements.txt` 覆盖旧文件
-- 新增 `config.py`
-- 新增 `pages/`、`services/`、`schemas/`、`.streamlit/`
+## 分支策略
 
-### 4. Streamlit Cloud 设置
+- `backup-v1-stable`：保留旧稳定版，不动。
+- `main`：当前线上部署分支。
+- `modular-sop2`：模块化开发/历史分支，可保留作为对照。
 
-Main file path 继续保持：
+Streamlit Cloud 的 Main file path 保持：
 
-`app.py`
+```text
+app.py
+```
 
 不需要新建第二个 Streamlit 网站。
 
-### 5. Secrets 不变
+---
 
-继续使用现有 Secrets：
+## Secrets
+
+继续使用 Streamlit Secrets，不要把 `secrets.toml`、API Key 或数据库密钥上传到 GitHub。
+
+需要的配置项按实际启用功能填写，例如：
 
 ```toml
-GEMINI_API_KEY = "你的Key"
-STAFF_PASSWORD = "你的员工密码"
-ADMIN_PASSWORD = "你的管理员密码"
+GEMINI_API_KEY = "..."
+STAFF_PASSWORD = "..."
+ADMIN_PASSWORD = "..."
+SUPABASE_URL = "..."
+SUPABASE_SECRET_KEY = "..."
 ```
 
-不要把 `secrets.toml` 上传到 GitHub。
+---
 
-### 6. 等待自动重启
+## Python 依赖
 
-`requirements.txt` 已更新为：
+`requirements.txt` 当前固定：
 
 ```text
 streamlit==1.62.0
@@ -88,24 +89,43 @@ pandas==3.0.5
 openpyxl==3.1.5
 ```
 
-Streamlit Cloud 会重新安装依赖并启动。
+---
+
+## SOP1｜爆款拆解
+
+主要维护文件：
+
+```text
+sop1_breakdown.py
+gemini_sop1.py
+sop1_schema.py
+```
+
+公共依赖主要来自：
+
+```text
+config.py
+common.py
+gemini_base.py
+history_service.py
+export_service.py
+```
+
+修改 SOP1 时，除非确实涉及共享能力，否则不要修改 SOP2 文件。
 
 ---
 
-## 上线后只检查这 8 项
+## SOP2｜爆款对比
 
-1. 登录正常。
-2. 顶部显示：`爆款拆解 / 爆款对比 / 数据复盘 / 历史记录`。
-3. SOP1 能正常上传多视频并解析。
-4. SOP1 选不同主参考视频时，卖点跟着对应视频变化。
-5. SOP1 填写真实卖点后，仍由使用人选择 `爆款为主 / 我的为主 / 融合`。
-6. SOP1 能生成 3 个方向与中文执行脚本。
-7. SOP2 能上传 `1-3 条爆款 + 1-3 条我的作品`，先预分析，再由使用人亲自选择比较对象，最后深度对比。
-8. SOP2 能导出 Excel 和 ChatGPT JSON。
+主要维护文件：
 
----
+```text
+sop2_compare.py
+gemini_sop2.py
+sop2_schema.py
+```
 
-## SOP2 当前逻辑
+当前流程：
 
 ```text
 产品信息
@@ -116,7 +136,7 @@ Streamlit Cloud 会重新安装依赖并启动。
 ↓
 Gemini 3.8 Flash / LOW：快速预分析
 ↓
-AI推荐比较组合（只推荐，不代替人选择）
+AI 推荐比较组合（只推荐，不代替人选择）
 ↓
 使用人选择 1 条爆款 + 1 条自己的作品
 ↓
@@ -133,42 +153,100 @@ Gemini 3.8 Flash / MEDIUM：直接看两条原视频深度对比
 导出 Excel + ChatGPT JSON
 ```
 
-SOP2 单次上限暂定 6 条：3 条爆款 + 3 条自己的作品。总文件较小时自动走 Inline，较大时自动切换 Files API。
+SOP2 单次上限：
+
+- 爆款视频最多 3 条
+- 我的作品最多 3 条
+- 合计最多 6 条
+- 小文件自动走 Inline
+- 较大文件自动切换 Gemini Files API
+
+SOP2 当前模型：
+
+```text
+gemini-3.8-flash
+```
+
+预分析使用 LOW thinking，深度对比使用 MEDIUM thinking。
 
 ---
 
-## 后续怎么维护
+## 数据复盘
 
-### 只改 SOP1
-
-优先修改：
+主要维护文件：
 
 ```text
-pages/sop1_breakdown.py
-services/gemini_sop1.py
-schemas/sop1_schema.py
+review_page.py
+gemini_review.py
+review_schema.py
+review_utils.py
 ```
 
-### 只改 SOP2
+---
 
-优先修改：
+## 历史记录
+
+主要维护文件：
 
 ```text
-pages/sop2_compare.py
-services/gemini_sop2.py
-schemas/sop2_schema.py
+history_page.py
+history_service.py
+auth_service.py
 ```
 
-### 公共层
+历史记录优先写入 Supabase；若 Supabase 暂时不可用，保留本地兼容/待同步机制，避免数据库瞬时故障中断 AI 主流程。
 
-以下文件尽量少动，因为它们是共享基础设施：
+---
+
+## 公共层｜尽量少动
 
 ```text
 app.py
 config.py
-services/auth_service.py
-services/history_service.py
-services/gemini_base.py
-services/export_service.py
+common.py
+auth_service.py
+history_service.py
+gemini_base.py
+export_service.py
 ```
 
+公共层只有在多个模块都需要同一能力时才修改。单独调整 SOP1 或 SOP2 的提示词、Schema、页面逻辑时，应优先在对应模块文件内完成。
+
+---
+
+## 上线后核验清单
+
+1. 登录正常。
+2. 顶部显示：`爆款拆解 / 爆款对比 / 数据复盘 / 历史记录`。
+3. SOP1 能上传多视频并解析。
+4. SOP1 切换主参考视频时，卖点与分析跟随正确视频变化。
+5. SOP1 能生成 3 个方向与中文执行脚本。
+6. SOP2 页面可以正常打开，不再出现 `No module named 'gemini_sop2'`。
+7. SOP2 能上传 `1-3 条爆款 + 1-3 条我的作品` 并完成预分析。
+8. SOP2 由使用人亲自选择比较对象后，能完成深度对比。
+9. SOP2 能导出 Excel 和 ChatGPT JSON。
+10. 历史记录能够正常读取、筛选和保存。
+
+---
+
+## 2026-09-07 修复记录
+
+已将错误文件名：
+
+```text
+gemini_sop2 .py
+```
+
+修正为：
+
+```text
+gemini_sop2.py
+```
+
+该空格会导致 `sop2_compare.py` 执行 `from gemini_sop2 import ...` 时出现：
+
+```text
+ModuleNotFoundError: No module named 'gemini_sop2'
+```
+
+当前 `main` 已使用正确文件名。
