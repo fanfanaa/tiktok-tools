@@ -185,12 +185,15 @@ def render_sidebar_history():
                     == operator_filter
                 ]
 
+        work_records = filtered[filtered["record_type"] == "工作记录"].copy()
+        operation_records = filtered[filtered["record_type"] != "工作记录"].copy()
+
         st.caption(
-            f"{len(filtered)} 条记录"
+            f"工作记录 {len(work_records)} · 操作历史 {len(operation_records)}"
         )
 
         csv_data = (
-            filtered
+            operation_records
             .to_csv(
                 index=False,
                 encoding="utf-8-sig",
@@ -201,7 +204,7 @@ def render_sidebar_history():
         )
 
         st.download_button(
-            "下载历史 CSV",
+            "下载操作历史 CSV",
             data=csv_data,
             file_name=(
                 "history_"

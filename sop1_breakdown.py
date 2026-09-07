@@ -8,6 +8,32 @@ from gemini_base import create_client, friendly_error
 from gemini_sop1 import analyze_videos, generate_directions, generate_final_script
 from history_service import append_history
 from export_service import final_script_to_df, build_analysis_export_excel
+from workspace_service import (
+    clear_retained_uploads,
+    get_retained_uploads,
+    new_workspace_id,
+    remember_uploads,
+    render_resume_notice,
+    restore_page_memory,
+    save_workspace_record,
+    snapshot_page_memory,
+)
+
+
+SOP1_PAGE_ID = "sop1"
+SOP1_WIDGET_KEYS = [
+    "analysis_account", "analysis_category_mode", "analysis_product_name",
+    "analysis_custom_category", "analysis_category_select",
+    "analysis_user_selling_points", "selected_reference_video_index",
+    "selected_direction_index", "final_selected_perspective", "final_selected_scene",
+]
+SOP1_STATE_KEYS = SOP1_WIDGET_KEYS + [
+    "video_analysis_result", "video_analysis_meta", "video_batch_signature",
+    "directions_result", "directions_meta", "directions_context_signature",
+    "last_direction_control_signature", "final_script_result", "final_script_meta",
+    "final_script_context_signature",
+]
+SOP1_DYNAMIC_PREFIXES = ("manual_selling_choice_", "effective_points_edit_")
 
 
 def _init_sop1_state():
@@ -22,6 +48,8 @@ def _init_sop1_state():
         st.session_state.setdefault(key, value)
 
 _init_sop1_state()
+restore_page_memory(SOP1_PAGE_ID, SOP1_WIDGET_KEYS, SOP1_DYNAMIC_PREFIXES)
+render_resume_notice(SOP1_PAGE_ID)
 api_key = get_api_key()
 client = create_client(api_key) if api_key else None
 if not api_key:
@@ -108,7 +136,7 @@ st.markdown(
     "### ② 上传爆款视频"
 )
 
-uploaded_videos = (
+new_uploaded_videos = (
     st.file_uploader(
         "支持同时上传 1-5 条 .mp4 视频",
         type=["mp4"],
@@ -116,6 +144,26 @@ uploaded_videos = (
         key="analysis_videos",
     )
 )
+
+if new_uploaded_videos:
+    remember_uploads(SOP1_PAGE_ID, "benchmark", new_uploaded_videos)
+
+retained_uploaded_videos = get_retained_uploads(SOP1_PAGE_ID, "benchmark")
+uploaded_videos = new_uploaded_videos or retained_uploaded_videos
+
+if retained_uploaded_videos and not new_uploaded_videos:
+    st.caption(
+        "✅ 页面切换前的视频仍已保留："
+        + "、".join(video.name for video in retained_uploaded_videos)
+    )
+    if st.button("清除已保留视频", key="sop1_clear_retained_uploads"):
+        clear_retained_uploads(SOP1_PAGE_ID, "benchmark")
+        st.session_state["video_batch_signature"] = ""
+        st.session_state["video_analysis_result"] = None
+        st.session_state["directions_result"] = None
+        st.session_state["final_script_result"] = None
+        new_workspace_id("SOP1")
+        st.rerun()
 
 if uploaded_videos:
 
@@ -151,6 +199,10 @@ if uploaded_videos:
         ]
         != signature
     ):
+
+        previous_signature = st.session_state.get("video_batch_signature", "")
+        if previous_signature:
+            new_workspace_id("SOP1")
 
         st.session_state[
             "video_batch_signature"
@@ -1642,4 +1694,66 @@ if analysis_result:
 
             use_container_width=True,
         )
+
+# --------------------------------------------------------
+# 页面状态与“工作记录”自动保存
+# --------------------------------------------------------
+snapshot_page_memory(SOP1_PAGE_ID, SOP1_WIDGET_KEYS, SOP1_DYNAMIC_PREFIXES)
+
+_workspace_analysis = st.session_state.get("video_analysis_result") or {}
+_workspace_directions = st.session_state.get("directions_result") or {}
+_workspace_final = st.session_state.get("final_script_result") or {}
+_workspace_ref_index = st.session_state.get("selected_reference_video_index")
+_workspace_ref_name = ""
+for _video in _workspace_analysis.get("videos", []) if isinstance(_workspace_analysis, dict) else []:
+    if safe_int(_video.get("video_index"), 0) == safe_int(_workspace_ref_index, 0):
+        _workspace_ref_name = clean_text(_video.get("filename", ""))
+        break
+
+_workspace_direction_name = ""
+_workspace_direction_index = safe_int(st.session_state.get("selected_direction_index"), 0)
+_workspace_direction_list = _workspace_directions.get("directions", []) if isinstance(_workspace_directions, dict) else []
+if 0 <= _workspace_direction_index < len(_workspace_direction_list):
+    _workspace_direction_name = clean_text(_workspace_direction_list[_workspace_direction_index].get("direction_name", ""))
+
+if _workspace_final:
+    _workspace_step = "最终拍摄脚本已生成"
+elif _workspace_directions:
+    _workspace_step = "3个方向已生成" + (f" · 已选：{_workspace_direction_name}" if _workspace_direction_name else "")
+elif _workspace_analysis:
+    _workspace_step = "爆款拆解已完成" + (f" · 主参考：{_workspace_ref_name}" if _workspace_ref_name else "")
+elif uploaded_videos:
+    _workspace_step = "视频已上传，待解析"
+else:
+    _workspace_step = "产品信息填写中"
+
+_workspace_video_names = " | ".join(video.name for video in (uploaded_videos or []))
+_workspace_meaningful = bool(
+    uploaded_videos
+    or clean_text(tiktok_account)
+    or clean_text(product_name)
+    or clean_text(input_selling_points)
+    or _workspace_analysis
+    or _workspace_directions
+    or _workspace_final
+)
+
+save_workspace_record(
+    module="SOP1",
+    page_id=SOP1_PAGE_ID,
+    page_path="sop1_breakdown.py",
+    step=_workspace_step,
+    state_keys=SOP1_STATE_KEYS,
+    dynamic_prefixes=SOP1_DYNAMIC_PREFIXES,
+    tiktok_account=tiktok_account,
+    product_category=category,
+    product_name=product_name,
+    input_selling_points=input_selling_points,
+    video_names=_workspace_video_names,
+    reference_video_name=_workspace_ref_name,
+    direction_name=_workspace_direction_name,
+    selected_scene=clean_text(st.session_state.get("final_selected_scene", "")),
+    selected_perspective=clean_text(st.session_state.get("final_selected_perspective", "")),
+    meaningful=_workspace_meaningful,
+)
 

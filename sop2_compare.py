@@ -10,6 +10,29 @@ from gemini_base import create_client, friendly_error
 from gemini_sop2 import pre_analyze, deep_compare
 from history_service import append_history
 from export_service import build_sop2_chatgpt_payload, build_sop2_export_excel
+from workspace_service import (
+    clear_retained_uploads,
+    get_retained_uploads,
+    new_workspace_id,
+    remember_uploads,
+    render_resume_notice,
+    restore_page_memory,
+    save_workspace_record,
+    snapshot_page_memory,
+)
+
+
+SOP2_PAGE_ID = "sop2"
+SOP2_WIDGET_KEYS = [
+    "sop2_account", "sop2_category_mode", "sop2_product_name",
+    "sop2_custom_category", "sop2_category_select", "sop2_user_points",
+    "sop2_selected_viral", "sop2_selected_own",
+]
+SOP2_STATE_KEYS = SOP2_WIDGET_KEYS + [
+    "sop2_pre_result", "sop2_pre_meta", "sop2_pre_completed_at",
+    "sop2_upload_signature", "sop2_deep_result", "sop2_deep_meta",
+    "sop2_deep_context",
+]
 
 
 def _init_state():
@@ -37,6 +60,8 @@ def _uploads_signature(viral, own, category, product_name, points):
 
 
 _init_state()
+restore_page_memory(SOP2_PAGE_ID, SOP2_WIDGET_KEYS)
+render_resume_notice(SOP2_PAGE_ID)
 api_key = get_api_key()
 client = create_client(api_key) if api_key else None
 if not api_key:
@@ -77,10 +102,41 @@ user_points = st.text_area("我们的真实产品卖点（选填）", key="sop2_
                            placeholder="用于约束对比结论，避免AI把爆款里不存在于我们产品的功能当成优化方向。")
 
 st.markdown("### ② 上传爆款视频")
-viral_videos = st.file_uploader(f"爆款视频 1-{SOP2_MAX_VIRAL_VIDEOS} 条", type=["mp4"], accept_multiple_files=True, key="sop2_viral_upload")
+new_viral_videos = st.file_uploader(
+    f"爆款视频 1-{SOP2_MAX_VIRAL_VIDEOS} 条",
+    type=["mp4"], accept_multiple_files=True, key="sop2_viral_upload"
+)
+if new_viral_videos:
+    remember_uploads(SOP2_PAGE_ID, "viral", new_viral_videos)
+retained_viral_videos = get_retained_uploads(SOP2_PAGE_ID, "viral")
+viral_videos = new_viral_videos or retained_viral_videos
+if retained_viral_videos and not new_viral_videos:
+    st.caption("✅ 页面切换前的爆款视频仍已保留：" + "、".join(v.name for v in retained_viral_videos))
 
 st.markdown("### ③ 上传我的拍摄作品")
-own_videos = st.file_uploader(f"我的作品 1-{SOP2_MAX_OWN_VIDEOS} 条", type=["mp4"], accept_multiple_files=True, key="sop2_own_upload")
+new_own_videos = st.file_uploader(
+    f"我的作品 1-{SOP2_MAX_OWN_VIDEOS} 条",
+    type=["mp4"], accept_multiple_files=True, key="sop2_own_upload"
+)
+if new_own_videos:
+    remember_uploads(SOP2_PAGE_ID, "own", new_own_videos)
+retained_own_videos = get_retained_uploads(SOP2_PAGE_ID, "own")
+own_videos = new_own_videos or retained_own_videos
+if retained_own_videos and not new_own_videos:
+    st.caption("✅ 页面切换前的我的作品仍已保留：" + "、".join(v.name for v in retained_own_videos))
+
+if (retained_viral_videos or retained_own_videos) and not (new_viral_videos or new_own_videos):
+    if st.button("清除已保留视频", key="sop2_clear_retained_uploads"):
+        clear_retained_uploads(SOP2_PAGE_ID)
+        st.session_state["sop2_upload_signature"] = ""
+        st.session_state["sop2_pre_result"] = None
+        st.session_state["sop2_pre_completed_at"] = ""
+        st.session_state["sop2_selected_viral"] = None
+        st.session_state["sop2_selected_own"] = None
+        st.session_state["sop2_deep_result"] = None
+        st.session_state["sop2_deep_context"] = ""
+        new_workspace_id("SOP2")
+        st.rerun()
 
 if viral_videos or own_videos:
     total_count = len(viral_videos or []) + len(own_videos or [])
@@ -88,6 +144,9 @@ if viral_videos or own_videos:
     st.caption(f"当前共 {total_count} 条 · 总大小 {total_mb:.2f} MB；系统会自动选择 Inline 或 Files API。")
     sig = _uploads_signature(viral_videos, own_videos, category, product_name, user_points)
     if st.session_state["sop2_upload_signature"] != sig:
+        previous_signature = st.session_state.get("sop2_upload_signature", "")
+        if previous_signature:
+            new_workspace_id("SOP2")
         st.session_state["sop2_upload_signature"] = sig
         st.session_state["sop2_pre_result"] = None
         st.session_state["sop2_pre_completed_at"] = ""
@@ -279,3 +338,57 @@ if pre:
                     file_name="SOP2_ChatGPT_"+datetime.now().strftime("%Y%m%d_%H%M")+".json",
                     mime="application/json", use_container_width=True
                 )
+
+# 页面状态与“工作记录”自动保存
+snapshot_page_memory(SOP2_PAGE_ID, SOP2_WIDGET_KEYS)
+_workspace_pre = st.session_state.get("sop2_pre_result") or {}
+_workspace_deep = st.session_state.get("sop2_deep_result") or {}
+_workspace_selected_viral = st.session_state.get("sop2_selected_viral")
+_workspace_selected_own = st.session_state.get("sop2_selected_own")
+_workspace_ref_name = ""
+_workspace_own_name = ""
+if isinstance(_workspace_pre, dict):
+    for _item in _workspace_pre.get("viral_videos", []):
+        if safe_int(_item.get("video_index"), 0) == safe_int(_workspace_selected_viral, 0):
+            _workspace_ref_name = clean_text(_item.get("filename", ""))
+            break
+    for _item in _workspace_pre.get("own_videos", []):
+        if safe_int(_item.get("video_index"), 0) == safe_int(_workspace_selected_own, 0):
+            _workspace_own_name = clean_text(_item.get("filename", ""))
+            break
+
+if _workspace_deep:
+    _workspace_step = "深度对比已完成"
+elif _workspace_pre and _workspace_selected_viral and _workspace_selected_own:
+    _workspace_step = f"预分析已完成 · 已选：{_workspace_ref_name or '爆款'} VS {_workspace_own_name or '我的作品'}"
+elif _workspace_pre:
+    _workspace_step = "预分析已完成，待选择比较对象"
+elif viral_videos or own_videos:
+    _workspace_step = "视频已上传，待预分析"
+else:
+    _workspace_step = "产品信息填写中"
+
+_workspace_video_names = (
+    "爆款: " + " | ".join(v.name for v in (viral_videos or []))
+    + "；我的: " + " | ".join(v.name for v in (own_videos or []))
+)
+_workspace_meaningful = bool(
+    viral_videos or own_videos or clean_text(tiktok_account) or clean_text(product_name)
+    or clean_text(user_points) or _workspace_pre or _workspace_deep
+)
+
+save_workspace_record(
+    module="SOP2",
+    page_id=SOP2_PAGE_ID,
+    page_path="sop2_compare.py",
+    step=_workspace_step,
+    state_keys=SOP2_STATE_KEYS,
+    tiktok_account=tiktok_account,
+    product_category=category,
+    product_name=product_name,
+    input_selling_points=user_points,
+    video_names=_workspace_video_names,
+    reference_video_name=_workspace_ref_name,
+    meaningful=_workspace_meaningful,
+)
+
