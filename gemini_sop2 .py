@@ -195,4 +195,4 @@ def deep_compare(client, viral_video, own_video, category, product_name, user_po
         result = parse_json_output(response.text)
         return result, {"analysis_seconds":round(time.perf_counter()-started,1), "analysis_mode":mode, "total_size_mb":round(total_mb,2), **meta}
     finally:
-        _cleanup(client, remote_files, temp_paths)
+        _cleanup(client, remote_files, temp_paths) 
