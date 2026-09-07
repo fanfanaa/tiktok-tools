@@ -486,6 +486,19 @@ if analysis_result:
             )
         )
 
+        common_strengths = summary.get("common_strengths", [])
+        common_weaknesses = summary.get("common_weaknesses", [])
+        if common_strengths or common_weaknesses:
+            strength_col, weakness_col = st.columns(2)
+            with strength_col:
+                st.markdown("**共同优势**")
+                for item in common_strengths:
+                    st.markdown(f"- {item}")
+            with weakness_col:
+                st.markdown("**共同短板 / 风险**")
+                for item in common_weaknesses:
+                    st.markdown(f"- {item}")
+
         st.markdown(
             "**最值得共同吸收的3点**"
         )
@@ -600,6 +613,19 @@ if analysis_result:
                         "",
                     )
                 )
+
+                strengths = video.get("strengths", [])
+                weaknesses = video.get("weaknesses", [])
+                if strengths or weaknesses:
+                    strength_col, weakness_col = st.columns(2)
+                    with strength_col:
+                        st.markdown("**优点 / 做得好的地方**")
+                        for item in strengths:
+                            st.markdown(f"- {item}")
+                    with weakness_col:
+                        st.markdown("**短板 / 可优化点**")
+                        for item in weaknesses:
+                            st.markdown(f"- {item}")
 
                 st.markdown(
                     "**最值得吸收的3点**"

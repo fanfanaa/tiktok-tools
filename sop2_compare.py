@@ -168,10 +168,13 @@ pre_button_type = "secondary" if pre_done else "primary"
 if pre_done:
     completed_at = st.session_state.get("sop2_pre_completed_at", "")
     st.caption(f"✅ 预分析已完成{(' · ' + completed_at) if completed_at else ''}。如需重新跑一次，可点击下方“重新分析”。")
+    pre_meta = st.session_state.get("sop2_pre_meta", {}) or {}
+    if clean_text(pre_meta.get("fallback_used")):
+        st.info("Gemini 3.8 当前繁忙，本次已自动切换 Gemini 3.5 完成预分析。")
 
 if st.button(pre_button_label, type=pre_button_type, use_container_width=True, disabled=(client is None or invalid), key="sop2_pre_btn"):
     try:
-        with st.spinner("Gemini 3.8 Flash 正在逐条预分析，并推荐最值得比较的组合…"):
+        with st.spinner("Gemini 3.8 优先分析；如遇高峰会自动切换 Gemini 3.5…"):
             result, meta = pre_analyze(client, viral_videos, own_videos, category, product_name, user_points)
         st.session_state["sop2_pre_result"] = result
         st.session_state["sop2_pre_meta"] = meta
@@ -252,7 +255,7 @@ if pre:
                 st.error("原视频文件已不在当前页面，请重新上传后再进行深度对比。")
             else:
                 try:
-                    with st.spinner("Gemini 3.8 Flash 正在直接观看两条原视频，进行深度差距、重剪和补拍诊断…"):
+                    with st.spinner("Gemini 3.8 优先深度对比；如遇高峰会自动切换 Gemini 3.5…"):
                         result, meta = deep_compare(client, viral_file, own_file, category, product_name, user_points, viral_summary, own_summary)
                     st.session_state["sop2_deep_result"] = result
                     st.session_state["sop2_deep_meta"] = meta
@@ -262,7 +265,8 @@ if pre:
                         "tiktok_account":tiktok_account, "product_category":category, "product_name":product_name,
                         "input_selling_points":user_points, "viral_video_name":viral_file.name, "own_video_name":own_file.name,
                         "reference_video_index":selected_viral, "reference_video_name":viral_file.name,
-                        "model_used":meta.get("model_used",""), "retry_count":meta.get("retry_count",""), "analysis_seconds":meta.get("analysis_seconds",""),
+                        "model_used":meta.get("model_used",""), "fallback_used":meta.get("fallback_used",""),
+                        "retry_count":meta.get("retry_count",""), "analysis_seconds":meta.get("analysis_seconds",""),
                         "diagnosis_summary":result.get("one_sentence_conclusion",""), "reedit_value":result.get("reedit_value",""),
                         "full_output_json":json_dumps(result),
                     })
@@ -272,6 +276,9 @@ if pre:
 
         deep = st.session_state.get("sop2_deep_result")
         if deep:
+            deep_meta = st.session_state.get("sop2_deep_meta", {}) or {}
+            if clean_text(deep_meta.get("fallback_used")):
+                st.info("Gemini 3.8 当前繁忙，本次深度对比已自动切换 Gemini 3.5 完成。")
             st.markdown("### ⑤ 核心差距结论")
             st.info(deep.get("one_sentence_conclusion",""))
             st.markdown(f'**核心差距：** {deep.get("core_gap","")}')

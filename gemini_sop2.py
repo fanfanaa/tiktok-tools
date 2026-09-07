@@ -14,33 +14,77 @@ from common import clean_text, parse_json_output
 from gemini_base import generate_resilient as _base_generate_resilient, wait_until_active
 
 
-def _run(client, contents, config):
-    """SOP2 专用调用包装。
+def _is_transient_error(exc):
+    text = f"{type(exc).__name__}: {exc}".upper()
+    markers = (
+        "429", "500", "502", "503", "504",
+        "RESOURCE_EXHAUSTED", "TOO_MANY_REQUESTS", "RATE_LIMIT",
+        "UNAVAILABLE", "SERVICE_UNAVAILABLE", "DEADLINE_EXCEEDED",
+        "HIGH DEMAND", "TEMPORARILY", "OVERLOADED",
+    )
+    return any(marker in text for marker in markers)
 
-    不修改 SOP1 的公共 Gemini 逻辑。SOP2 对 429/5xx/UNAVAILABLE 等临时错误
-    单独最多自动重试 5 次；若仍失败，再恢复原始 cause 并写入 Streamlit Cloud Logs。
-    """
+
+def _run(client, contents, primary_config, fallback_config):
+    """SOP2: Gemini 3.8 优先；高峰/限流时直接切 Gemini 3.5。"""
+    primary_model = SOP2_MODEL_CHAIN[0] if SOP2_MODEL_CHAIN else "gemini-3.8-flash"
+    fallback_model = "gemini-3.5-flash-lite"
+
     try:
-        return _base_generate_resilient(
+        response, meta = _base_generate_resilient(
             client,
             contents,
-            config,
-            model_chain=SOP2_MODEL_CHAIN,
-            max_attempts_per_model=5,
+            primary_config,
+            model_chain=[primary_model],
+            max_attempts_per_model=1,
         )
+        meta = dict(meta or {})
+        meta.setdefault("primary_model", primary_model)
+        meta.setdefault("fallback_used", "")
+        return response, meta
     except Exception as exc:
         raw_exc = getattr(exc, "__cause__", None) or exc
+        if not _is_transient_error(raw_exc):
+            print(
+                f"[SOP2 Gemini RAW ERROR] type={type(raw_exc).__name__} error={raw_exc}",
+                flush=True,
+            )
+            raise raw_exc
+
         print(
-            f"[SOP2 Gemini RAW ERROR] type={type(raw_exc).__name__} error={raw_exc}",
+            f"[SOP2] {primary_model} busy/unavailable -> fallback {fallback_model}: {raw_exc}",
             flush=True,
         )
-        raise raw_exc
+
+        try:
+            response, meta = _base_generate_resilient(
+                client,
+                contents,
+                fallback_config,
+                model_chain=[fallback_model],
+                max_attempts_per_model=2,
+            )
+            meta = dict(meta or {})
+            meta["primary_model"] = primary_model
+            meta["fallback_used"] = fallback_model
+            return response, meta
+        except Exception as fallback_exc:
+            raw_fallback = getattr(fallback_exc, "__cause__", None) or fallback_exc
+            print(
+                f"[SOP2 Gemini FALLBACK ERROR] type={type(raw_fallback).__name__} error={raw_fallback}",
+                flush=True,
+            )
+            raise raw_fallback
 
 
 def _thinking(level):
-    # Gemini 3.8 Flash: low / medium / high；不使用 minimal
+    # Gemini 3.8 Flash 支持 low/medium/high。
     return types.ThinkingConfig(thinking_level=level)
 
+
+def _fallback_thinking():
+    # Gemini 3.5 Flash Lite 走最轻 thinking，优先保证高峰期可用性与速度。
+    return types.ThinkingConfig(thinking_level="minimal")
 
 def _build_parts(client, labeled_videos):
     total_bytes = sum(len(v.getvalue()) for _, _, v in labeled_videos)
@@ -123,14 +167,22 @@ def pre_analyze(client, viral_videos, own_videos, category, product_name, user_p
     try:
         parts.append(types.Part.from_text(text=build_pre_analysis_prompt(category, product_name, user_points, [v.name for v in viral_videos], [v.name for v in own_videos])))
         content = types.Content(role="user", parts=parts)
-        config = types.GenerateContentConfig(
-            system_instruction="这是给中国运营团队看的多视频预分析。所有分析字段必须简体中文。你只有推荐权，没有最终选择权。",
+        system_instruction = "这是给中国运营团队看的多视频预分析。所有分析字段必须简体中文。你只有推荐权，没有最终选择权。"
+        primary_config = types.GenerateContentConfig(
+            system_instruction=system_instruction,
             thinking_config=_thinking("low"),
             max_output_tokens=5000,
             response_mime_type="application/json",
             response_json_schema=SOP2_PRE_ANALYSIS_SCHEMA,
         )
-        response, meta = _run(client, content, config)
+        fallback_config = types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            thinking_config=_fallback_thinking(),
+            max_output_tokens=5000,
+            response_mime_type="application/json",
+            response_json_schema=SOP2_PRE_ANALYSIS_SCHEMA,
+        )
+        response, meta = _run(client, content, primary_config, fallback_config)
         result = parse_json_output(response.text)
         return result, {"analysis_seconds": round(time.perf_counter()-started,1), "analysis_mode":mode, "total_size_mb":round(total_mb,2), **meta}
     finally:
@@ -184,14 +236,22 @@ def deep_compare(client, viral_video, own_video, category, product_name, user_po
     try:
         parts.append(types.Part.from_text(text=build_deep_compare_prompt(category, product_name, user_points, viral_summary, own_summary)))
         content = types.Content(role="user", parts=parts)
-        config = types.GenerateContentConfig(
-            system_instruction="这是给中国团队执行的爆款对比、重剪和补拍诊断。所有分析必须简体中文；结论必须具体、可执行。",
+        system_instruction = "这是给中国团队执行的爆款对比、重剪和补拍诊断。所有分析必须简体中文；结论必须具体、可执行。"
+        primary_config = types.GenerateContentConfig(
+            system_instruction=system_instruction,
             thinking_config=_thinking("medium"),
             max_output_tokens=9000,
             response_mime_type="application/json",
             response_json_schema=SOP2_DEEP_COMPARE_SCHEMA,
         )
-        response, meta = _run(client, content, config)
+        fallback_config = types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            thinking_config=_fallback_thinking(),
+            max_output_tokens=9000,
+            response_mime_type="application/json",
+            response_json_schema=SOP2_DEEP_COMPARE_SCHEMA,
+        )
+        response, meta = _run(client, content, primary_config, fallback_config)
         result = parse_json_output(response.text)
         return result, {"analysis_seconds":round(time.perf_counter()-started,1), "analysis_mode":mode, "total_size_mb":round(total_mb,2), **meta}
     finally:
