@@ -75,7 +75,7 @@ SOP2_DEEP_TASK_KEY = task_key("sop2_deep_compare")
 if not api_key:
     st.error("系统未配置 Gemini API Key，请联系管理员。")
 
-st.caption("SOP2｜爆款 VS 我的作品 → 找差距 → 重剪 / 补拍 → 导出 Excel + ChatGPT JSON")
+st.caption("爆款对比｜爆款 VS 我的作品 → 找差距 → 重剪 / 补拍 → 导出 Excel + ChatGPT JSON")
 
 st.markdown("### ① 产品信息")
 c1,c2,c3 = st.columns(3)
@@ -108,6 +108,8 @@ else:
 
 user_points = st.text_area("我们的真实产品卖点（选填）", key="sop2_user_points", height=85,
                            placeholder="用于约束对比结论，避免AI把爆款里不存在于我们产品的功能当成优化方向。")
+
+st.caption("固定制作约束：真人不露脸/不正面出镜；以第一人称 POV、第三人称手部/肩部为主；真实民宿小场景。对方真人露脸只视为源视频呈现方式，不作为我们必须复刻的优势或短板。")
 
 st.markdown("### ② 上传爆款视频")
 new_viral_videos = st.file_uploader(

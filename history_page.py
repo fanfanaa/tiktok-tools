@@ -8,6 +8,17 @@ from common import clean_text
 from history_service import import_history_dataframe, scoped_history
 from workspace_service import restore_workspace_record
 
+MODULE_LABELS = {
+    "SOP1": "爆款拆解",
+    "SOP2": "爆款对比",
+    "REVIEW": "数据复盘",
+    "review": "数据复盘",
+}
+
+def module_label(value):
+    raw = clean_text(value)
+    return MODULE_LABELS.get(raw, raw or "工作记录")
+
 st.caption("历史记录｜工作记录可继续打开｜操作历史永久保存｜Supabase 持久化")
 
 history = scoped_history()
@@ -30,10 +41,12 @@ with work_tab:
                 filtered_work = filtered_work[filtered_work["operator"] == selected_operator]
 
     with f2:
-        module_options = ["全部"] + sorted([x for x in filtered_work.get("module", pd.Series(dtype=str)).unique() if x])
-        selected_module = st.selectbox("模块", module_options, key="work_history_module")
-        if selected_module != "全部":
-            filtered_work = filtered_work[filtered_work["module"] == selected_module]
+        raw_modules = sorted([x for x in filtered_work.get("module", pd.Series(dtype=str)).unique() if x])
+        module_options = ["全部"] + [module_label(x) for x in raw_modules]
+        selected_module_label = st.selectbox("模块", module_options, key="work_history_module")
+        if selected_module_label != "全部":
+            selected_raw_module = next((x for x in raw_modules if module_label(x) == selected_module_label), selected_module_label)
+            filtered_work = filtered_work[filtered_work["module"] == selected_raw_module]
 
     with f3:
         account_options = ["全部"] + sorted([x for x in filtered_work.get("tiktok_account", pd.Series(dtype=str)).unique() if x])
@@ -48,7 +61,7 @@ with work_tab:
             filtered_work = filtered_work.sort_values("created_at_utc", ascending=False)
 
         for _, row in filtered_work.iterrows():
-            module = clean_text(row.get("module", "")) or "工作"
+            module = module_label(row.get("module", ""))
             product_name = clean_text(row.get("product_name", "")) or "未填写产品名"
             step = clean_text(row.get("diagnosis_summary", "")) or "处理中"
             saved_at = clean_text(row.get("created_at_cn", ""))
