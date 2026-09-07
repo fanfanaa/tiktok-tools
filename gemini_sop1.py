@@ -6,14 +6,24 @@ from pathlib import Path
 
 from google.genai import types
 
-from config import MAX_COMPARE_VIDEOS, INLINE_BATCH_MAX_MB, SCENE_LIBRARY
+from config import SOP1_MODEL_CHAIN, MAX_COMPARE_VIDEOS, INLINE_BATCH_MAX_MB, SCENE_LIBRARY
 from common import clean_text, parse_json_output
-from gemini_base import generate_resilient, wait_until_active
+from gemini_base import generate_resilient as _base_generate_resilient, wait_until_active
 from sop1_schema import VIDEO_ANALYSIS_SCHEMA, DIRECTIONS_SCHEMA, FINAL_SCRIPT_SCHEMA
 
 
 def _thinking():
     return types.ThinkingConfig(thinking_level="minimal")
+
+
+def generate_resilient(client, contents, config):
+    """SOP1 使用自己的稳定模型链：3.5 -> 3.1 -> 3.6。"""
+    return _base_generate_resilient(
+        client,
+        contents,
+        config,
+        model_chain=SOP1_MODEL_CHAIN,
+    )
 
 
 def _scene_description(scene_name):
