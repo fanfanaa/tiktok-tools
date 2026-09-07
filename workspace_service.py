@@ -49,6 +49,11 @@ def restore_page_memory(page_id: str, widget_keys: Iterable[str], dynamic_prefix
     prefixes = tuple(dynamic_prefixes)
     for key, value in memory.get("widgets", {}).items():
         if key in allowed or (prefixes and key.startswith(prefixes)):
+            # 只有页面切换导致 widget key 被 Streamlit 清掉时才恢复。
+            # 如果当前 key 已存在，说明这是同页交互（radio/selectbox/button rerun），
+            # 必须保留用户刚刚的选择，不能用旧快照覆盖。
+            if key in st.session_state:
+                continue
             try:
                 st.session_state[key] = copy.deepcopy(value)
             except Exception:

@@ -135,19 +135,32 @@ def build_pre_analysis_prompt(category, product_name, user_points, viral_names, 
 爆款视频：{viral_names}
 我的作品：{own_names}
 
-本阶段只做“快速预分析”和“推荐比较组合”，不要做最终重剪方案。
+本阶段做“详细预分析 + 优缺点诊断 + 推荐比较组合”，不要只给一句话短评，也不要提前输出最终重剪方案。
 
-请分别逐条分析爆款视频和我的作品，每条都输出：
-- 一句话核心
-- 脚本路线
-- 2-5条主要卖点
-- 前3秒Hook
-- 画面与节奏
-- 作为对比样本的价值
-- 推荐指数0-100
+请分别逐条分析爆款视频和我的作品，每条都必须输出足够让运营/剪辑直接判断的内容：
+- 一句话核心：不要真的只有一句短句，写成2-3句，说明它在卖什么、靠什么吸引人。
+- 脚本路线：按 Hook → 痛点/需求 → 产品切入 → Demo/Proof → CTA 的顺序详细说明，建议120-220字。
+- 2-5条主要卖点。
+- 前3秒Hook：描述具体画面、动作、字幕/口播、为什么能留人，建议80-160字。
+- 画面与节奏：镜头数量/变化、景别、手部动作、产品展示、信息密度、转场节奏，建议100-220字。
+- strengths：3-6条，每条必须是“观察到的优点 + 为什么有效”，不能只写形容词。
+- weaknesses：3-6条，每条必须指出短板/风险/可优化处；爆款也必须挑短板，不能因为是爆款就只说优点。
+- why_it_works：解释这条视频真正起作用的机制，建议100-200字。
+- improvement_priority：如果只允许改一个问题，最优先改什么以及原因。
+- 作为对比样本的价值。
+- 推荐指数0-100。
 
 然后推荐 1 条爆款 + 1 条我的作品作为最值得深入比较的组合。
 推荐依据优先考虑：卖点/购买动机相近、产品Demo路径可比、脚本结构可比、最有利于定位“为什么爆款更强或我们哪里更强”。
+
+同时输出 quick_comparison，对 AI 推荐的这一组做预览级优缺点对比：
+- 爆款优势 3-6条
+- 爆款短板 3-6条
+- 我的优势 3-6条
+- 我的短板 3-6条
+- 最大差距
+- 最值得吸收的3-5点
+每一条都要具体到画面/节奏/卖点/字幕/动作，不要写“更抓人、节奏更好”这种空话。
 
 重要：推荐只用于提示。最终比较对象必须由使用人自己选择。
 不得虚构平台真实数据、销量、认证、产品能力。严格按 JSON Schema 输出。
@@ -171,14 +184,14 @@ def pre_analyze(client, viral_videos, own_videos, category, product_name, user_p
         primary_config = types.GenerateContentConfig(
             system_instruction=system_instruction,
             thinking_config=_thinking("low"),
-            max_output_tokens=5000,
+            max_output_tokens=7600,
             response_mime_type="application/json",
             response_json_schema=SOP2_PRE_ANALYSIS_SCHEMA,
         )
         fallback_config = types.GenerateContentConfig(
             system_instruction=system_instruction,
             thinking_config=_fallback_thinking(),
-            max_output_tokens=5000,
+            max_output_tokens=7600,
             response_mime_type="application/json",
             response_json_schema=SOP2_PRE_ANALYSIS_SCHEMA,
         )
@@ -211,17 +224,19 @@ def build_deep_compare_prompt(category, product_name, user_points, viral_summary
 3. 我的脚本路线。
 4. 核心差距。
 5. 严格输出10个对比维度，顺序必须覆盖：{dimensions}。
-   每项包含：爆款表现、我的表现、核心差距、具体建议。
-6. 我的优势 2-6 条。
-7. 我的劣势 2-6 条。
-8. 重剪价值只能判断为：高 / 中 / 低，并解释原因。
-9. 直接给时间段级重剪计划：
+   每项包含：爆款表现、我的表现、核心差距、具体建议。每个“表现/差距/建议”都要尽量写到具体画面、动作、字幕、时间位置或信息密度，避免一句话敷衍。
+6. 爆款优势 3-6 条：不仅说强，还要说明强在哪、为什么有效。
+7. 爆款短板 3-6 条：必须挑出爆款也存在的不足、风险或不可照搬处。
+8. 我的优势 3-6 条：指出已经做对、值得保留甚至放大的部分。
+9. 我的短板 3-6 条：指出最影响留存/理解/点击/转化的具体问题。
+10. 重剪价值只能判断为：高 / 中 / 低，并解释原因。
+11. 直接给时间段级重剪计划：
    - 可以保留 keep_segments
    - 建议删除 delete_segments
    - 建议前移/调整 move_segments
    - 必须补拍 reshoot_segments
-10. editing_plan：按优先级说明整条如何重剪。
-11. optimization_plan：下次拍摄应该吸收什么，避免机械复制爆款。
+12. editing_plan：按优先级说明整条如何重剪。
+13. optimization_plan：下次拍摄应该吸收什么，避免机械复制爆款。
 
 时间码可以根据视频画面估算到可供剪辑定位的程度，但不要假装是逐帧测量；没有明确证据时不要虚构精准帧号。
 不要因为爆款这么拍，就强行让我们的产品展示不存在的功能；真实产品卖点优先。
@@ -240,14 +255,14 @@ def deep_compare(client, viral_video, own_video, category, product_name, user_po
         primary_config = types.GenerateContentConfig(
             system_instruction=system_instruction,
             thinking_config=_thinking("medium"),
-            max_output_tokens=9000,
+            max_output_tokens=11000,
             response_mime_type="application/json",
             response_json_schema=SOP2_DEEP_COMPARE_SCHEMA,
         )
         fallback_config = types.GenerateContentConfig(
             system_instruction=system_instruction,
             thinking_config=_fallback_thinking(),
-            max_output_tokens=9000,
+            max_output_tokens=11000,
             response_mime_type="application/json",
             response_json_schema=SOP2_DEEP_COMPARE_SCHEMA,
         )

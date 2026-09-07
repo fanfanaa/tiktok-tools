@@ -10,6 +10,12 @@ from gemini_base import create_client, friendly_error
 from gemini_sop2 import pre_analyze, deep_compare
 from history_service import append_history
 from export_service import build_sop2_chatgpt_payload, build_sop2_export_excel
+from background_service import (
+    render_background_task_status,
+    submit_background_task,
+    take_background_task,
+    task_key,
+)
 from workspace_service import (
     clear_retained_uploads,
     get_retained_uploads,
@@ -64,6 +70,8 @@ restore_page_memory(SOP2_PAGE_ID, SOP2_WIDGET_KEYS)
 render_resume_notice(SOP2_PAGE_ID)
 api_key = get_api_key()
 client = create_client(api_key) if api_key else None
+SOP2_PRE_TASK_KEY = task_key("sop2_pre_analysis")
+SOP2_DEEP_TASK_KEY = task_key("sop2_deep_compare")
 if not api_key:
     st.error("系统未配置 Gemini API Key，请联系管理员。")
 
@@ -172,27 +180,69 @@ if pre_done:
     if clean_text(pre_meta.get("fallback_used")):
         st.info("Gemini 3.8 当前繁忙，本次已自动切换 Gemini 3.5 完成预分析。")
 
+# 预分析改为后台任务：换页不会中断。
+pre_task = take_background_task(SOP2_PRE_TASK_KEY)
+if pre_task:
+    task_context = pre_task.get("context", {})
+    if pre_task.get("status") == "done":
+        result, meta = pre_task.get("result")
+        # 只把结果写回发起任务时的同一批输入，避免用户中途换视频后旧结果覆盖新状态。
+        if task_context.get("input_signature") == st.session_state.get("sop2_upload_signature"):
+            st.session_state["sop2_pre_result"] = result
+            st.session_state["sop2_pre_meta"] = meta
+            st.session_state["sop2_pre_completed_at"] = datetime.now().strftime("%H:%M")
+            st.session_state["sop2_selected_viral"] = None
+            st.session_state["sop2_selected_own"] = None
+            st.session_state["sop2_deep_result"] = None
+            append_history({
+                "module":"SOP2", "record_type":"爆款对比预分析",
+                "role":task_context.get("role", ""), "operator":task_context.get("operator", ""),
+                "tiktok_account":task_context.get("tiktok_account", ""),
+                "product_category":task_context.get("category", ""),
+                "product_name":task_context.get("product_name", ""),
+                "input_selling_points":task_context.get("user_points", ""),
+                "video_names":task_context.get("video_names", ""),
+                "video_count":task_context.get("video_count", ""),
+                "model_used":meta.get("model_used",""),
+                "fallback_used":meta.get("fallback_used",""),
+                "retry_count":meta.get("retry_count",""),
+                "analysis_seconds":meta.get("analysis_seconds",""),
+                "full_output_json":json_dumps(result),
+            })
+            st.success("爆款对比预分析已在后台完成。")
+        else:
+            st.warning("刚才的后台预分析已完成，但当前上传内容已经变化，因此没有覆盖当前页面。")
+    elif pre_task.get("status") == "error":
+        st.error(friendly_error(pre_task.get("error")))
+
 if st.button(pre_button_label, type=pre_button_type, use_container_width=True, disabled=(client is None or invalid), key="sop2_pre_btn"):
-    try:
-        with st.spinner("Gemini 3.8 优先分析；如遇高峰会自动切换 Gemini 3.5…"):
-            result, meta = pre_analyze(client, viral_videos, own_videos, category, product_name, user_points)
-        st.session_state["sop2_pre_result"] = result
-        st.session_state["sop2_pre_meta"] = meta
-        st.session_state["sop2_pre_completed_at"] = datetime.now().strftime("%H:%M")
-        st.session_state["sop2_selected_viral"] = None
-        st.session_state["sop2_selected_own"] = None
-        st.session_state["sop2_deep_result"] = None
-        append_history({
-            "module":"SOP2", "record_type":"爆款对比预分析", "role":st.session_state["role"], "operator":st.session_state["operator"],
-            "tiktok_account":tiktok_account, "product_category":category, "product_name":product_name,
-            "input_selling_points":user_points, "video_names":"爆款: " + " | ".join(v.name for v in viral_videos) + "；我的: " + " | ".join(v.name for v in own_videos),
-            "video_count":len(viral_videos)+len(own_videos), "model_used":meta.get("model_used",""),
-            "fallback_used":meta.get("fallback_used",""), "retry_count":meta.get("retry_count",""), "analysis_seconds":meta.get("analysis_seconds",""),
-            "full_output_json":json_dumps(result),
-        })
+    task_viral = get_retained_uploads(SOP2_PAGE_ID, "viral") or viral_videos
+    task_own = get_retained_uploads(SOP2_PAGE_ID, "own") or own_videos
+    submitted = submit_background_task(
+        SOP2_PRE_TASK_KEY,
+        pre_analyze,
+        client, task_viral, task_own, category, product_name, user_points,
+        context={
+            "input_signature": st.session_state.get("sop2_upload_signature", ""),
+            "role": st.session_state.get("role", ""),
+            "operator": st.session_state.get("operator", ""),
+            "tiktok_account": tiktok_account,
+            "category": category,
+            "product_name": product_name,
+            "user_points": user_points,
+            "video_names": "爆款: " + " | ".join(v.name for v in task_viral) + "；我的: " + " | ".join(v.name for v in task_own),
+            "video_count": len(task_viral) + len(task_own),
+        },
+    )
+    if submitted:
         st.rerun()
-    except Exception as exc:
-        st.error(friendly_error(exc))
+    else:
+        st.info("这项预分析已经在后台运行，无需重复提交。")
+
+render_background_task_status(
+    SOP2_PRE_TASK_KEY,
+    "Gemini 3.8 正在后台做爆款对比预分析；如遇高峰会自动切换 Gemini 3.5。",
+)
 
 pre = st.session_state.get("sop2_pre_result")
 if pre:
@@ -201,20 +251,67 @@ if pre:
         pre.get("recommended_viral_index",""), pre.get("recommended_own_index",""), pre.get("recommendation_reason","")
     ))
 
-    with st.expander("查看全部视频预分析", expanded=False):
+    quick = pre.get("quick_comparison", {}) or {}
+    if quick:
+        st.markdown("#### AI推荐组合｜快速优缺点对比")
+        q1, q2 = st.columns(2)
+        with q1:
+            st.markdown("**爆款优势**")
+            for x in quick.get("viral_advantages", []): st.markdown(f"- {x}")
+            st.markdown("**爆款短板**")
+            for x in quick.get("viral_weaknesses", []): st.markdown(f"- {x}")
+        with q2:
+            st.markdown("**我的优势**")
+            for x in quick.get("own_advantages", []): st.markdown(f"- {x}")
+            st.markdown("**我的短板**")
+            for x in quick.get("own_weaknesses", []): st.markdown(f"- {x}")
+        st.markdown(f'**最大差距：** {quick.get("biggest_gap", "")}')
+        st.markdown("**最值得吸收：**")
+        for x in quick.get("most_worth_learning", []): st.markdown(f"- {x}")
+
+    with st.expander("查看全部视频详细预分析", expanded=False):
         st.markdown("**爆款视频**")
         for v in pre.get("viral_videos",[]):
             st.markdown(f'**爆款{v.get("video_index")}｜{v.get("filename","")}｜推荐指数 {v.get("recommend_score","")}**')
             st.write(v.get("one_sentence_core",""))
-            st.caption("脚本路线：" + clean_text(v.get("script_route","")))
-            st.caption("前3秒：" + clean_text(v.get("first_3s_hook","")))
-        st.divider()
+            st.markdown("**脚本路线**")
+            st.write(v.get("script_route",""))
+            st.markdown("**前3秒 Hook**")
+            st.write(v.get("first_3s_hook",""))
+            st.markdown("**画面与节奏**")
+            st.write(v.get("visual_rhythm",""))
+            va, vb = st.columns(2)
+            with va:
+                st.markdown("**优点**")
+                for x in v.get("strengths",[]): st.markdown(f"- {x}")
+            with vb:
+                st.markdown("**短板 / 风险**")
+                for x in v.get("weaknesses",[]): st.markdown(f"- {x}")
+            st.markdown(f'**为什么有效：** {v.get("why_it_works", "")}')
+            st.markdown(f'**最优先改进：** {v.get("improvement_priority", "")}')
+            st.markdown(f'**对比价值：** {v.get("compare_value", "")}')
+            st.divider()
         st.markdown("**我的作品**")
         for v in pre.get("own_videos",[]):
             st.markdown(f'**作品{v.get("video_index")}｜{v.get("filename","")}｜推荐指数 {v.get("recommend_score","")}**')
             st.write(v.get("one_sentence_core",""))
-            st.caption("脚本路线：" + clean_text(v.get("script_route","")))
-            st.caption("前3秒：" + clean_text(v.get("first_3s_hook","")))
+            st.markdown("**脚本路线**")
+            st.write(v.get("script_route",""))
+            st.markdown("**前3秒 Hook**")
+            st.write(v.get("first_3s_hook",""))
+            st.markdown("**画面与节奏**")
+            st.write(v.get("visual_rhythm",""))
+            oa, ob = st.columns(2)
+            with oa:
+                st.markdown("**优点**")
+                for x in v.get("strengths",[]): st.markdown(f"- {x}")
+            with ob:
+                st.markdown("**短板 / 风险**")
+                for x in v.get("weaknesses",[]): st.markdown(f"- {x}")
+            st.markdown(f'**为什么有效：** {v.get("why_it_works", "")}')
+            st.markdown(f'**最优先改进：** {v.get("improvement_priority", "")}')
+            st.markdown(f'**对比价值：** {v.get("compare_value", "")}')
+            st.divider()
 
     viral_options = [safe_int(v.get("video_index"),i+1) for i,v in enumerate(pre.get("viral_videos",[]))]
     own_options = [safe_int(v.get("video_index"),i+1) for i,v in enumerate(pre.get("own_videos",[]))]
@@ -246,33 +343,75 @@ if pre:
             st.session_state["sop2_deep_result"] = None
             st.session_state["sop2_deep_context"] = ""
 
-        if st.button("开始深度对比", type="primary", use_container_width=True, key="sop2_deep_btn"):
-            # 使用人选的是预分析编号，对应当前 uploader 列表的 1-based 顺序
-            try:
-                viral_file = viral_videos[selected_viral - 1]
-                own_file = own_videos[selected_own - 1]
-            except Exception:
-                st.error("原视频文件已不在当前页面，请重新上传后再进行深度对比。")
-            else:
-                try:
-                    with st.spinner("Gemini 3.8 优先深度对比；如遇高峰会自动切换 Gemini 3.5…"):
-                        result, meta = deep_compare(client, viral_file, own_file, category, product_name, user_points, viral_summary, own_summary)
+        deep_task = take_background_task(SOP2_DEEP_TASK_KEY)
+        if deep_task:
+            task_context = deep_task.get("context", {})
+            if deep_task.get("status") == "done":
+                result, meta = deep_task.get("result")
+                if task_context.get("deep_context") == deep_context:
                     st.session_state["sop2_deep_result"] = result
                     st.session_state["sop2_deep_meta"] = meta
                     st.session_state["sop2_deep_context"] = deep_context
                     append_history({
-                        "module":"SOP2", "record_type":"爆款深度对比", "role":st.session_state["role"], "operator":st.session_state["operator"],
-                        "tiktok_account":tiktok_account, "product_category":category, "product_name":product_name,
-                        "input_selling_points":user_points, "viral_video_name":viral_file.name, "own_video_name":own_file.name,
-                        "reference_video_index":selected_viral, "reference_video_name":viral_file.name,
-                        "model_used":meta.get("model_used",""), "fallback_used":meta.get("fallback_used",""),
-                        "retry_count":meta.get("retry_count",""), "analysis_seconds":meta.get("analysis_seconds",""),
-                        "diagnosis_summary":result.get("one_sentence_conclusion",""), "reedit_value":result.get("reedit_value",""),
+                        "module":"SOP2", "record_type":"爆款深度对比",
+                        "role":task_context.get("role", ""), "operator":task_context.get("operator", ""),
+                        "tiktok_account":task_context.get("tiktok_account", ""),
+                        "product_category":task_context.get("category", ""),
+                        "product_name":task_context.get("product_name", ""),
+                        "input_selling_points":task_context.get("user_points", ""),
+                        "viral_video_name":task_context.get("viral_video_name", ""),
+                        "own_video_name":task_context.get("own_video_name", ""),
+                        "reference_video_index":task_context.get("selected_viral", ""),
+                        "reference_video_name":task_context.get("viral_video_name", ""),
+                        "model_used":meta.get("model_used",""),
+                        "fallback_used":meta.get("fallback_used",""),
+                        "retry_count":meta.get("retry_count",""),
+                        "analysis_seconds":meta.get("analysis_seconds",""),
+                        "diagnosis_summary":result.get("one_sentence_conclusion",""),
+                        "reedit_value":result.get("reedit_value",""),
                         "full_output_json":json_dumps(result),
                     })
-                    st.success("深度对比完成。")
-                except Exception as exc:
-                    st.error(friendly_error(exc))
+                    st.success("深度对比已在后台完成。")
+                else:
+                    st.warning("刚才的后台深度对比已完成，但当前比较对象已经变化，因此没有覆盖当前结果。")
+            elif deep_task.get("status") == "error":
+                st.error(friendly_error(deep_task.get("error")))
+
+        if st.button("开始深度对比", type="primary", use_container_width=True, key="sop2_deep_btn"):
+            task_viral_files = get_retained_uploads(SOP2_PAGE_ID, "viral") or viral_videos
+            task_own_files = get_retained_uploads(SOP2_PAGE_ID, "own") or own_videos
+            try:
+                viral_file = task_viral_files[selected_viral - 1]
+                own_file = task_own_files[selected_own - 1]
+            except Exception:
+                st.error("原视频文件已不在当前页面，请重新上传后再进行深度对比。")
+            else:
+                submitted = submit_background_task(
+                    SOP2_DEEP_TASK_KEY,
+                    deep_compare,
+                    client, viral_file, own_file, category, product_name, user_points, viral_summary, own_summary,
+                    context={
+                        "deep_context": deep_context,
+                        "role": st.session_state.get("role", ""),
+                        "operator": st.session_state.get("operator", ""),
+                        "tiktok_account": tiktok_account,
+                        "category": category,
+                        "product_name": product_name,
+                        "user_points": user_points,
+                        "viral_video_name": viral_file.name,
+                        "own_video_name": own_file.name,
+                        "selected_viral": selected_viral,
+                    },
+                )
+                if submitted:
+                    st.rerun()
+                else:
+                    st.info("这项深度对比已经在后台运行，无需重复提交。")
+
+        render_background_task_status(
+            SOP2_DEEP_TASK_KEY,
+            "Gemini 3.8 正在后台做深度对比；如遇高峰会自动切换 Gemini 3.5。",
+        )
 
         deep = st.session_state.get("sop2_deep_result")
         if deep:
@@ -296,13 +435,17 @@ if pre:
             dims = pd.DataFrame(deep.get("comparison_dimensions",[])).rename(columns={"dimension":"对比项","viral":"爆款视频","own":"我的作品","gap":"核心差距","suggestion":"建议"})
             st.dataframe(dims, hide_index=True, use_container_width=True)
 
-            st.markdown("### ⑧ 我的优势 / 我的劣势")
+            st.markdown("### ⑧ 双方优缺点对比")
             a,b = st.columns(2)
             with a:
+                st.markdown("**爆款优势**")
+                for x in deep.get("viral_strengths",[]): st.markdown(f"- {x}")
+                st.markdown("**爆款短板 / 不建议照搬**")
+                for x in deep.get("viral_weaknesses",[]): st.markdown(f"- {x}")
+            with b:
                 st.markdown("**我的优势**")
                 for x in deep.get("own_strengths",[]): st.markdown(f"- {x}")
-            with b:
-                st.markdown("**我的劣势**")
+                st.markdown("**我的短板 / 优先修正**")
                 for x in deep.get("own_weaknesses",[]): st.markdown(f"- {x}")
 
             st.markdown("### ⑨ 重剪与补拍判断")

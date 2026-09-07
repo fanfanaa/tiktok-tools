@@ -8,6 +8,12 @@ from gemini_base import create_client, friendly_error
 from gemini_sop1 import analyze_videos, generate_directions, generate_final_script
 from history_service import append_history
 from export_service import final_script_to_df, build_analysis_export_excel
+from background_service import (
+    render_background_task_status,
+    submit_background_task,
+    take_background_task,
+    task_key,
+)
 from workspace_service import (
     clear_retained_uploads,
     get_retained_uploads,
@@ -52,6 +58,9 @@ restore_page_memory(SOP1_PAGE_ID, SOP1_WIDGET_KEYS, SOP1_DYNAMIC_PREFIXES)
 render_resume_notice(SOP1_PAGE_ID)
 api_key = get_api_key()
 client = create_client(api_key) if api_key else None
+SOP1_ANALYSIS_TASK_KEY = task_key("sop1_video_analysis")
+SOP1_DIRECTIONS_TASK_KEY = task_key("sop1_directions")
+SOP1_FINAL_TASK_KEY = task_key("sop1_final_script")
 if not api_key:
     st.error("系统未配置 Gemini API Key，请联系管理员。")
 
@@ -255,129 +264,66 @@ analyze_button = (
     )
 )
 
+# 爆款解析后台结果回收。页面切换时任务仍由线程池继续执行。
+analysis_task = take_background_task(SOP1_ANALYSIS_TASK_KEY)
+if analysis_task:
+    task_context = analysis_task.get("context", {})
+    if analysis_task.get("status") == "done":
+        result, metadata = analysis_task.get("result")
+        if task_context.get("input_signature") == st.session_state.get("video_batch_signature"):
+            st.session_state["video_analysis_result"] = result
+            st.session_state["video_analysis_meta"] = metadata
+            recommended = safe_int(result.get("recommended_reference_video_index", 1), 1)
+            st.session_state["selected_reference_video_index"] = recommended
+            append_history({
+                "record_type": "爆款对比解析",
+                "role": task_context.get("role", ""),
+                "operator": task_context.get("operator", ""),
+                "tiktok_account": task_context.get("tiktok_account", ""),
+                "product_category": task_context.get("category", ""),
+                "product_name": task_context.get("product_name", ""),
+                "input_selling_points": task_context.get("input_selling_points", ""),
+                "video_names": task_context.get("video_names", ""),
+                "video_count": task_context.get("video_count", ""),
+                "model_used": metadata.get("model_used", ""),
+                "fallback_used": metadata.get("fallback_used", ""),
+                "retry_count": metadata.get("retry_count", ""),
+                "analysis_seconds": metadata.get("analysis_seconds", ""),
+                "full_output_json": json_dumps(result),
+            })
+            st.success("爆款视频解析已在后台完成。")
+        else:
+            st.warning("刚才的后台爆款解析已完成，但当前上传内容已经变化，因此没有覆盖当前页面。")
+    elif analysis_task.get("status") == "error":
+        st.error(friendly_error(analysis_task.get("error")))
+
 if analyze_button:
+    task_videos = get_retained_uploads(SOP1_PAGE_ID, "benchmark") or uploaded_videos
+    submitted = submit_background_task(
+        SOP1_ANALYSIS_TASK_KEY,
+        analyze_videos,
+        client, task_videos, category, product_name, input_selling_points,
+        context={
+            "input_signature": st.session_state.get("video_batch_signature", ""),
+            "role": st.session_state.get("role", ""),
+            "operator": st.session_state.get("operator", ""),
+            "tiktok_account": tiktok_account,
+            "category": category,
+            "product_name": product_name,
+            "input_selling_points": input_selling_points,
+            "video_names": " | ".join(video.name for video in task_videos),
+            "video_count": len(task_videos),
+        },
+    )
+    if submitted:
+        st.rerun()
+    else:
+        st.info("这项爆款解析已经在后台运行，无需重复提交。")
 
-    try:
-
-        with st.spinner(
-            "正在逐条拆解视频并提取独立卖点…"
-        ):
-
-            (
-                result,
-                metadata,
-            ) = analyze_videos(
-                client,
-                uploaded_videos,
-                category,
-                product_name,
-                input_selling_points,
-            )
-
-        st.session_state[
-            "video_analysis_result"
-        ] = result
-
-        st.session_state[
-            "video_analysis_meta"
-        ] = metadata
-
-        recommended = safe_int(
-            result.get(
-                "recommended_reference_video_index",
-                1,
-            ),
-            1,
-        )
-
-        st.session_state[
-            "selected_reference_video_index"
-        ] = recommended
-
-        append_history(
-            {
-
-                "record_type":
-                    "爆款对比解析",
-
-                "role":
-                    st.session_state[
-                        "role"
-                    ],
-
-                "operator":
-                    st.session_state[
-                        "operator"
-                    ],
-
-                "tiktok_account":
-                    tiktok_account,
-
-                "product_category":
-                    category,
-
-                "product_name":
-                    product_name,
-
-                "input_selling_points":
-                    input_selling_points,
-
-                "video_names":
-                    " | ".join(
-                        [
-                            video.name
-                            for video
-                            in uploaded_videos
-                        ]
-                    ),
-
-                "video_count":
-                    len(
-                        uploaded_videos
-                    ),
-
-                "model_used":
-                    metadata.get(
-                        "model_used",
-                        "",
-                    ),
-
-                "fallback_used":
-                    metadata.get(
-                        "fallback_used",
-                        "",
-                    ),
-
-                "retry_count":
-                    metadata.get(
-                        "retry_count",
-                        "",
-                    ),
-
-                "analysis_seconds":
-                    metadata.get(
-                        "analysis_seconds",
-                        "",
-                    ),
-
-                "full_output_json":
-                    json_dumps(
-                        result
-                    ),
-            }
-        )
-
-        st.success(
-            "爆款视频解析完成。"
-        )
-
-    except Exception as exc:
-
-        st.error(
-            friendly_error(
-                exc
-            )
-        )
+render_background_task_status(
+    SOP1_ANALYSIS_TASK_KEY,
+    "正在后台逐条拆解爆款视频并提取独立卖点。",
+)
 
 analysis_result = (
     st.session_state.get(
@@ -1074,136 +1020,72 @@ if analysis_result:
         )
     )
 
+    directions_task = take_background_task(SOP1_DIRECTIONS_TASK_KEY)
+    if directions_task:
+        task_context = directions_task.get("context", {})
+        if directions_task.get("status") == "done":
+            directions_result, directions_meta = directions_task.get("result")
+            if task_context.get("direction_context") == current_direction_context:
+                st.session_state["directions_result"] = directions_result
+                st.session_state["directions_meta"] = directions_meta
+                st.session_state["directions_context_signature"] = current_direction_context
+                st.session_state["selected_direction_index"] = 0
+                st.session_state["final_script_result"] = None
+                append_history({
+                    "record_type": "3方向生成",
+                    "role": task_context.get("role", ""),
+                    "operator": task_context.get("operator", ""),
+                    "tiktok_account": task_context.get("tiktok_account", ""),
+                    "product_category": task_context.get("category", ""),
+                    "product_name": task_context.get("product_name", ""),
+                    "input_selling_points": task_context.get("input_selling_points", ""),
+                    "inferred_selling_points": task_context.get("viral_points_text", ""),
+                    "effective_selling_points": task_context.get("effective_selling_points", ""),
+                    "selling_point_mode": task_context.get("selling_point_mode", ""),
+                    "reference_video_index": task_context.get("selected_ref_index", ""),
+                    "reference_video_name": task_context.get("reference_video_name", ""),
+                    "model_used": directions_meta.get("model_used", ""),
+                    "fallback_used": directions_meta.get("fallback_used", ""),
+                    "retry_count": directions_meta.get("retry_count", ""),
+                    "analysis_seconds": directions_meta.get("analysis_seconds", ""),
+                    "full_output_json": json_dumps(directions_result),
+                })
+                st.success("3个拍摄方向已在后台生成。")
+            else:
+                st.warning("刚才的后台方向生成已完成，但当前参考视频或卖点选择已经变化，因此没有覆盖当前结果。")
+        elif directions_task.get("status") == "error":
+            st.error(friendly_error(directions_task.get("error")))
+
     if generate_direction_button:
+        submitted = submit_background_task(
+            SOP1_DIRECTIONS_TASK_KEY,
+            generate_directions,
+            client, category, product_name, summary, chosen_ref_video,
+            input_selling_points, effective_selling_points, selling_point_mode,
+            context={
+                "direction_context": current_direction_context,
+                "role": st.session_state.get("role", ""),
+                "operator": st.session_state.get("operator", ""),
+                "tiktok_account": tiktok_account,
+                "category": category,
+                "product_name": product_name,
+                "input_selling_points": input_selling_points,
+                "viral_points_text": viral_points_text,
+                "effective_selling_points": effective_selling_points,
+                "selling_point_mode": selling_point_mode,
+                "selected_ref_index": selected_ref_index,
+                "reference_video_name": chosen_ref_video.get("filename", ""),
+            },
+        )
+        if submitted:
+            st.rerun()
+        else:
+            st.info("3个拍摄方向已经在后台生成中，无需重复提交。")
 
-        try:
-
-            with st.spinner(
-                "正在生成3个不同拍摄方向…"
-            ):
-
-                (
-                    directions_result,
-                    directions_meta,
-                ) = generate_directions(
-                    client,
-                    category,
-                    product_name,
-                    summary,
-                    chosen_ref_video,
-                    input_selling_points,
-                    effective_selling_points,
-                    selling_point_mode,
-                )
-
-            st.session_state[
-                "directions_result"
-            ] = directions_result
-
-            st.session_state[
-                "directions_meta"
-            ] = directions_meta
-
-            st.session_state[
-                "directions_context_signature"
-            ] = current_direction_context
-
-            st.session_state[
-                "selected_direction_index"
-            ] = 0
-
-            st.session_state[
-                "final_script_result"
-            ] = None
-
-            append_history(
-                {
-
-                    "record_type":
-                        "3方向生成",
-
-                    "role":
-                        st.session_state[
-                            "role"
-                        ],
-
-                    "operator":
-                        st.session_state[
-                            "operator"
-                        ],
-
-                    "tiktok_account":
-                        tiktok_account,
-
-                    "product_category":
-                        category,
-
-                    "product_name":
-                        product_name,
-
-                    "input_selling_points":
-                        input_selling_points,
-
-                    "inferred_selling_points":
-                        viral_points_text,
-
-                    "effective_selling_points":
-                        effective_selling_points,
-
-                    "selling_point_mode":
-                        selling_point_mode,
-
-                    "reference_video_index":
-                        selected_ref_index,
-
-                    "reference_video_name":
-                        chosen_ref_video.get(
-                            "filename",
-                            "",
-                        ),
-
-                    "model_used":
-                        directions_meta.get(
-                            "model_used",
-                            "",
-                        ),
-
-                    "fallback_used":
-                        directions_meta.get(
-                            "fallback_used",
-                            "",
-                        ),
-
-                    "retry_count":
-                        directions_meta.get(
-                            "retry_count",
-                            "",
-                        ),
-
-                    "analysis_seconds":
-                        directions_meta.get(
-                            "analysis_seconds",
-                            "",
-                        ),
-
-                    "full_output_json":
-                        json_dumps(
-                            directions_result
-                        ),
-                }
-            )
-
-            st.success(
-                "3个拍摄方向已生成。"
-            )
-
-        except Exception as exc:
-
-            st.error(
-                friendly_error(
-                    exc
-                )
-            )
+    render_background_task_status(
+        SOP1_DIRECTIONS_TASK_KEY,
+        "正在后台生成3个不同拍摄方向。",
+    )
 
     directions_result = (
         st.session_state.get(
@@ -1509,140 +1391,76 @@ if analysis_result:
                 )
             )
 
+            final_task = take_background_task(SOP1_FINAL_TASK_KEY)
+            if final_task:
+                task_context = final_task.get("context", {})
+                if final_task.get("status") == "done":
+                    final_result, final_meta = final_task.get("result")
+                    if task_context.get("final_context") == current_final_context:
+                        st.session_state["final_script_result"] = final_result
+                        st.session_state["final_script_meta"] = final_meta
+                        st.session_state["final_script_context_signature"] = current_final_context
+                        append_history({
+                            "record_type": "最终拍摄脚本",
+                            "role": task_context.get("role", ""),
+                            "operator": task_context.get("operator", ""),
+                            "tiktok_account": task_context.get("tiktok_account", ""),
+                            "product_category": task_context.get("category", ""),
+                            "product_name": task_context.get("product_name", ""),
+                            "input_selling_points": task_context.get("input_selling_points", ""),
+                            "inferred_selling_points": task_context.get("viral_points_text", ""),
+                            "effective_selling_points": task_context.get("effective_selling_points", ""),
+                            "selling_point_mode": task_context.get("selling_point_mode", ""),
+                            "reference_video_index": task_context.get("selected_ref_index", ""),
+                            "reference_video_name": task_context.get("reference_video_name", ""),
+                            "direction_name": task_context.get("direction_name", ""),
+                            "selected_scene": task_context.get("selected_scene", ""),
+                            "selected_perspective": task_context.get("selected_perspective", ""),
+                            "model_used": final_meta.get("model_used", ""),
+                            "fallback_used": final_meta.get("fallback_used", ""),
+                            "retry_count": final_meta.get("retry_count", ""),
+                            "analysis_seconds": final_meta.get("analysis_seconds", ""),
+                            "full_output_json": json_dumps(final_result),
+                        })
+                        st.success("最终拍摄脚本已在后台生成。")
+                    else:
+                        st.warning("刚才的后台脚本生成已完成，但当前方向/场景/视角已经变化，因此没有覆盖当前结果。")
+                elif final_task.get("status") == "error":
+                    st.error(friendly_error(final_task.get("error")))
+
             if generate_script_button:
+                submitted = submit_background_task(
+                    SOP1_FINAL_TASK_KEY,
+                    generate_final_script,
+                    client, category, product_name, chosen_ref_video, effective_selling_points,
+                    chosen_direction, selected_scene, selected_perspective,
+                    context={
+                        "final_context": current_final_context,
+                        "role": st.session_state.get("role", ""),
+                        "operator": st.session_state.get("operator", ""),
+                        "tiktok_account": tiktok_account,
+                        "category": category,
+                        "product_name": product_name,
+                        "input_selling_points": input_selling_points,
+                        "viral_points_text": viral_points_text,
+                        "effective_selling_points": effective_selling_points,
+                        "selling_point_mode": selling_point_mode,
+                        "selected_ref_index": selected_ref_index,
+                        "reference_video_name": chosen_ref_video.get("filename", ""),
+                        "direction_name": chosen_direction.get("direction_name", ""),
+                        "selected_scene": selected_scene,
+                        "selected_perspective": selected_perspective,
+                    },
+                )
+                if submitted:
+                    st.rerun()
+                else:
+                    st.info("最终拍摄脚本已经在后台生成中，无需重复提交。")
 
-                try:
-
-                    with st.spinner(
-                        "正在生成中文可执行拍摄脚本…"
-                    ):
-
-                        (
-                            final_result,
-                            final_meta,
-                        ) = generate_final_script(
-                            client,
-                            category,
-                            product_name,
-                            chosen_ref_video,
-                            effective_selling_points,
-                            chosen_direction,
-                            selected_scene,
-                            selected_perspective,
-                        )
-
-                    st.session_state[
-                        "final_script_result"
-                    ] = final_result
-
-                    st.session_state[
-                        "final_script_meta"
-                    ] = final_meta
-
-                    st.session_state[
-                        "final_script_context_signature"
-                    ] = current_final_context
-
-                    append_history(
-                        {
-
-                            "record_type":
-                                "最终拍摄脚本",
-
-                            "role":
-                                st.session_state[
-                                    "role"
-                                ],
-
-                            "operator":
-                                st.session_state[
-                                    "operator"
-                                ],
-
-                            "tiktok_account":
-                                tiktok_account,
-
-                            "product_category":
-                                category,
-
-                            "product_name":
-                                product_name,
-
-                            "input_selling_points":
-                                input_selling_points,
-
-                            "inferred_selling_points":
-                                viral_points_text,
-
-                            "effective_selling_points":
-                                effective_selling_points,
-
-                            "selling_point_mode":
-                                selling_point_mode,
-
-                            "reference_video_index":
-                                selected_ref_index,
-
-                            "reference_video_name":
-                                chosen_ref_video.get(
-                                    "filename",
-                                    "",
-                                ),
-
-                            "direction_name":
-                                chosen_direction.get(
-                                    "direction_name",
-                                    "",
-                                ),
-
-                            "selected_scene":
-                                selected_scene,
-
-                            "selected_perspective":
-                                selected_perspective,
-
-                            "model_used":
-                                final_meta.get(
-                                    "model_used",
-                                    "",
-                                ),
-
-                            "fallback_used":
-                                final_meta.get(
-                                    "fallback_used",
-                                    "",
-                                ),
-
-                            "retry_count":
-                                final_meta.get(
-                                    "retry_count",
-                                    "",
-                                ),
-
-                            "analysis_seconds":
-                                final_meta.get(
-                                    "analysis_seconds",
-                                    "",
-                                ),
-
-                            "full_output_json":
-                                json_dumps(
-                                    final_result
-                                ),
-                        }
-                    )
-
-                    st.success(
-                        "最终拍摄脚本已生成。"
-                    )
-
-                except Exception as exc:
-
-                    st.error(
-                        friendly_error(
-                            exc
-                        )
-                    )
+            render_background_task_status(
+                SOP1_FINAL_TASK_KEY,
+                "正在后台生成中文可执行拍摄脚本。",
+            )
 
     # ----------------------------------------------------
     # ⑨ 最终脚本

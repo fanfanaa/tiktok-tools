@@ -636,6 +636,11 @@ def build_sop2_chatgpt_payload(deep_result, product_info, viral_name, own_name):
         "own_video": {"filename": own_name, "script_route": deep_result.get("own_script_route", "")},
         "core_gap": deep_result.get("core_gap", ""),
         "one_sentence_conclusion": deep_result.get("one_sentence_conclusion", ""),
+        "viral_strengths": deep_result.get("viral_strengths", []),
+        "viral_weaknesses": deep_result.get("viral_weaknesses", []),
+        "own_strengths": deep_result.get("own_strengths", []),
+        "own_weaknesses": deep_result.get("own_weaknesses", []),
+        # 兼容旧版下游字段
         "strengths": deep_result.get("own_strengths", []),
         "weaknesses": deep_result.get("own_weaknesses", []),
         "reedit_value": deep_result.get("reedit_value", ""),
@@ -665,8 +670,10 @@ def build_sop2_export_excel(deep_result, chatgpt_payload):
     dims = pd.DataFrame(deep_result.get("comparison_dimensions", []))
     dims = dims.rename(columns={"dimension":"对比项","viral":"爆款视频","own":"我的作品","gap":"核心差距","suggestion":"建议"})
     sw_rows = []
+    for x in deep_result.get("viral_strengths", []): sw_rows.append({"类型":"爆款优势","内容":x})
+    for x in deep_result.get("viral_weaknesses", []): sw_rows.append({"类型":"爆款短板","内容":x})
     for x in deep_result.get("own_strengths", []): sw_rows.append({"类型":"我的优势","内容":x})
-    for x in deep_result.get("own_weaknesses", []): sw_rows.append({"类型":"我的劣势","内容":x})
+    for x in deep_result.get("own_weaknesses", []): sw_rows.append({"类型":"我的短板","内容":x})
     strengths = pd.DataFrame(sw_rows, columns=["类型","内容"])
     edit_rows = []
     for x in deep_result.get("keep_segments", []): edit_rows.append({"动作":"保留","时间/镜头":x.get("time_range",""),"内容":x.get("content",""),"原因/目的":x.get("reason","")})
@@ -676,7 +683,7 @@ def build_sop2_export_excel(deep_result, chatgpt_payload):
     edit_df = pd.DataFrame(edit_rows, columns=["动作","时间/镜头","内容","原因/目的"])
     json_df = pd.DataFrame([{"ChatGPT_JSON": json.dumps(chatgpt_payload, ensure_ascii=False, indent=2)}])
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        for df, name in [(overview,"对比总览"),(dims,"10维差距"),(strengths,"我的优势劣势"),(edit_df,"重剪与补拍计划"),(json_df,"ChatGPT_JSON")]:
+        for df, name in [(overview,"对比总览"),(dims,"10维差距"),(strengths,"双方优缺点"),(edit_df,"重剪与补拍计划"),(json_df,"ChatGPT_JSON")]:
             df.to_excel(writer, index=False, sheet_name=name)
             format_sheet(writer.book[name])
     output.seek(0)
