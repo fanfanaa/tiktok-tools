@@ -1,4 +1,5 @@
 from datetime import datetime
+import html
 
 import streamlit as st
 
@@ -42,6 +43,234 @@ SOP1_STATE_KEYS = SOP1_WIDGET_KEYS + [
 SOP1_DYNAMIC_PREFIXES = ("manual_selling_choice_", "effective_points_edit_")
 
 
+def _storyboard_text(value):
+    """Human-facing storyboard text; keep it clean and safe for HTML/SVG."""
+    return html.escape(clean_text(value) or "—")
+
+
+def _render_storyboard_cards(final_script_result):
+    """Render the final script as visual Chinese cards for filming/editing."""
+    storyboard = final_script_result.get("storyboard", []) if isinstance(final_script_result, dict) else []
+    if not storyboard:
+        return
+
+    st.markdown(
+        """
+        <style>
+        .shot-card {
+            border: 1px solid #e7e9ee;
+            border-radius: 16px;
+            background: #ffffff;
+            padding: 18px 18px 16px 18px;
+            margin: 0 0 16px 0;
+            box-shadow: 0 2px 10px rgba(20, 24, 40, 0.05);
+            min-height: 340px;
+        }
+        .shot-card-head {
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:12px;
+            margin-bottom:12px;
+            padding-bottom:10px;
+            border-bottom:1px solid #f0f1f4;
+        }
+        .shot-card-title {
+            font-size:18px;
+            font-weight:800;
+            color:#1f2937;
+        }
+        .shot-card-time {
+            flex:0 0 auto;
+            font-size:13px;
+            font-weight:700;
+            color:#ff4b4b;
+            background:#fff0f0;
+            border-radius:999px;
+            padding:5px 10px;
+        }
+        .shot-card-row {
+            margin:9px 0;
+            font-size:14px;
+            line-height:1.65;
+            color:#374151;
+        }
+        .shot-card-label {
+            font-weight:800;
+            color:#111827;
+            margin-right:5px;
+        }
+        .shot-card-copy {
+            margin-top:12px;
+            padding:12px 14px;
+            border-radius:12px;
+            background:#f7f8fa;
+            font-size:15px;
+            line-height:1.7;
+            color:#111827;
+            font-weight:650;
+        }
+        .shot-card-foot {
+            margin-top:12px;
+            padding-top:10px;
+            border-top:1px dashed #e5e7eb;
+            font-size:13px;
+            line-height:1.6;
+            color:#6b7280;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    cols = st.columns(2)
+    for index, item in enumerate(storyboard):
+        sequence = _storyboard_text(item.get("sequence") or str(index + 1))
+        time_range = _storyboard_text(item.get("time_range"))
+        shot = _storyboard_text(item.get("shot"))
+        visual = _storyboard_text(item.get("visual"))
+        hand_action = _storyboard_text(item.get("hand_action"))
+        copy_cn = _storyboard_text(item.get("copy_cn"))
+        audio = _storyboard_text(item.get("audio"))
+        rationale = _storyboard_text(item.get("rationale"))
+
+        card = f"""
+        <div class="shot-card">
+          <div class="shot-card-head">
+            <div class="shot-card-title">🎬 第{sequence}镜</div>
+            <div class="shot-card-time">{time_range}</div>
+          </div>
+          <div class="shot-card-row"><span class="shot-card-label">📷 机位 / 景别：</span>{shot}</div>
+          <div class="shot-card-row"><span class="shot-card-label">🖼️ 画面：</span>{visual}</div>
+          <div class="shot-card-row"><span class="shot-card-label">✋ 手部动作：</span>{hand_action}</div>
+          <div class="shot-card-copy"><span class="shot-card-label">💬 中文字幕 / 中文口播：</span>{copy_cn}</div>
+          <div class="shot-card-row"><span class="shot-card-label">🎵 剪辑 / 音效：</span>{audio}</div>
+          <div class="shot-card-foot"><span class="shot-card-label">🎯 这一镜为什么拍：</span>{rationale}</div>
+        </div>
+        """
+        with cols[index % 2]:
+            st.markdown(card, unsafe_allow_html=True)
+
+
+def _wrap_storyboard_lines(value, width=24, max_lines=8):
+    text = clean_text(value) or "—"
+    # Chinese storyboard text is best wrapped by character count, while preserving existing line breaks.
+    lines = []
+    for raw_line in str(text).splitlines() or [str(text)]:
+        raw_line = raw_line.strip()
+        if not raw_line:
+            continue
+        while raw_line:
+            lines.append(raw_line[:width])
+            raw_line = raw_line[width:]
+            if len(lines) >= max_lines:
+                break
+        if len(lines) >= max_lines:
+            break
+    if not lines:
+        lines = ["—"]
+    return lines
+
+
+def _svg_text_block(x, y, label, value, width=24, font_size=27, line_height=38, max_lines=8):
+    lines = _wrap_storyboard_lines(value, width=width, max_lines=max_lines)
+    safe_label = html.escape(label)
+    parts = [
+        f'<text x="{x}" y="{y}" font-size="{font_size}" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, Arial, sans-serif" fill="#111827">',
+        f'<tspan font-weight="700">{safe_label}</tspan>',
+    ]
+    first = True
+    for line in lines:
+        safe_line = html.escape(line)
+        if first:
+            parts.append(f'<tspan dx="10">{safe_line}</tspan>')
+            first = False
+        else:
+            parts.append(f'<tspan x="{x}" dy="{line_height}">{safe_line}</tspan>')
+    parts.append('</text>')
+    height = max(1, len(lines)) * line_height
+    return "".join(parts), height
+
+
+def _build_storyboard_svg(final_script_result, product_name=""):
+    """Create a real downloadable SVG storyboard image; no extra AI/API call required."""
+    storyboard = final_script_result.get("storyboard", []) if isinstance(final_script_result, dict) else []
+    if not storyboard:
+        return b""
+
+    canvas_w = 1600
+    margin = 58
+    gap = 34
+    card_w = (canvas_w - margin * 2 - gap) // 2
+    header_h = 160
+
+    cards = []
+    for idx, item in enumerate(storyboard):
+        fields = [
+            ("机位/景别：", item.get("shot", ""), 24, 5),
+            ("画面：", item.get("visual", ""), 24, 8),
+            ("手部动作：", item.get("hand_action", ""), 24, 6),
+            ("中文字幕/口播：", item.get("copy_cn", ""), 22, 6),
+            ("剪辑/音效：", item.get("audio", ""), 24, 5),
+            ("这一镜为什么拍：", item.get("rationale", ""), 24, 5),
+        ]
+        estimated = 112
+        for _, value, width, max_lines in fields:
+            estimated += min(max_lines, max(1, (len(clean_text(value) or "—") + width - 1) // width)) * 38 + 28
+        cards.append((item, max(520, estimated)))
+
+    # Row positions use the taller card in each pair.
+    row_heights = []
+    for i in range(0, len(cards), 2):
+        pair = cards[i:i+2]
+        row_heights.append(max(h for _, h in pair))
+    canvas_h = header_h + margin + sum(row_heights) + gap * max(0, len(row_heights) - 1) + margin
+
+    svg = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{canvas_w}" height="{canvas_h}" viewBox="0 0 {canvas_w} {canvas_h}">',
+        '<rect width="100%" height="100%" fill="#f6f7f9"/>',
+        f'<text x="{margin}" y="68" font-size="42" font-weight="800" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, Arial, sans-serif" fill="#111827">中文分镜图｜拍摄 / 剪辑执行版</text>',
+        f'<text x="{margin}" y="116" font-size="24" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, Arial, sans-serif" fill="#6b7280">{html.escape(clean_text(product_name) or "TikTok 爆款拍摄方案")} · 每镜一卡 · 现场按顺序执行</text>',
+    ]
+
+    y = header_h
+    card_index = 0
+    for row_idx, row_h in enumerate(row_heights):
+        for col_idx in range(2):
+            if card_index >= len(cards):
+                break
+            item, card_h = cards[card_index]
+            x = margin + col_idx * (card_w + gap)
+            sequence = html.escape(clean_text(item.get("sequence")) or str(card_index + 1))
+            time_range = html.escape(clean_text(item.get("time_range")) or "—")
+
+            svg.append(f'<rect x="{x}" y="{y}" width="{card_w}" height="{card_h}" rx="22" fill="#ffffff" stroke="#e5e7eb" stroke-width="2"/>')
+            svg.append(f'<rect x="{x}" y="{y}" width="{card_w}" height="76" rx="22" fill="#fff0f0"/>')
+            # Mask lower rounded edge of header for a clean straight divider.
+            svg.append(f'<rect x="{x}" y="{y+54}" width="{card_w}" height="22" fill="#fff0f0"/>')
+            svg.append(f'<text x="{x+26}" y="{y+50}" font-size="31" font-weight="800" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, Arial, sans-serif" fill="#111827">第{sequence}镜</text>')
+            svg.append(f'<text x="{x+card_w-26}" y="{y+50}" text-anchor="end" font-size="24" font-weight="700" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, Arial, sans-serif" fill="#ff4b4b">{time_range}</text>')
+
+            cursor_y = y + 118
+            sections = [
+                ("机位/景别：", item.get("shot", ""), 24, 5),
+                ("画面：", item.get("visual", ""), 24, 8),
+                ("手部动作：", item.get("hand_action", ""), 24, 6),
+                ("中文字幕/口播：", item.get("copy_cn", ""), 22, 6),
+                ("剪辑/音效：", item.get("audio", ""), 24, 5),
+                ("这一镜为什么拍：", item.get("rationale", ""), 24, 5),
+            ]
+            for label, value, width, max_lines in sections:
+                block, block_h = _svg_text_block(x+26, cursor_y, label, value, width=width, max_lines=max_lines)
+                svg.append(block)
+                cursor_y += block_h + 28
+            card_index += 1
+        y += row_h + gap
+
+    svg.append('</svg>')
+    return "".join(svg).encode("utf-8")
+
+
 def _init_sop1_state():
     defaults = {
         "video_analysis_result": None, "video_analysis_meta": {}, "video_batch_signature": "",
@@ -64,7 +293,7 @@ SOP1_FINAL_TASK_KEY = task_key("sop1_final_script")
 if not api_key:
     st.error("系统未配置 Gemini API Key，请联系管理员。")
 
-st.caption("SOP1｜爆款拆解 → 选择卖点 → 3个方向 → 最终拍摄脚本")
+st.caption("爆款拆解｜爆款分析 → 选择卖点 → 3个方向 → 最终拍摄脚本 → 中文分镜图")
 
 # --------------------------------------------------------
 # ① 产品
@@ -1538,6 +1767,34 @@ if analysis_result:
 
             use_container_width=True,
         )
+
+        # ------------------------------------------------
+        # ⑩ 中文分镜图（给拍摄 / 剪辑人员看）
+        # ------------------------------------------------
+        st.markdown("### ⑩ 中文分镜图（拍摄 / 剪辑执行版）")
+        st.caption(
+            "每镜一卡，只保留现场最需要看的信息：机位、画面、动作、中文字幕、剪辑提示。"
+            "不是给机器识别，拍摄时可直接按卡片顺序执行。"
+        )
+
+        _render_storyboard_cards(final_script_result)
+
+        storyboard_svg = _build_storyboard_svg(
+            final_script_result,
+            product_name=product_name,
+        )
+        if storyboard_svg:
+            st.download_button(
+                "下载中文分镜图（SVG大图）",
+                data=storyboard_svg,
+                file_name=(
+                    "TikTok中文分镜图_"
+                    + datetime.now().strftime("%Y%m%d_%H%M")
+                    + ".svg"
+                ),
+                mime="image/svg+xml",
+                use_container_width=True,
+            )
 
 # --------------------------------------------------------
 # 页面状态与“工作记录”自动保存
