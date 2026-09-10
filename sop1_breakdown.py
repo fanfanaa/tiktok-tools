@@ -1,5 +1,6 @@
 from datetime import datetime
 import html
+import io
 
 import streamlit as st
 
@@ -270,6 +271,146 @@ def _build_storyboard_svg(final_script_result, product_name=""):
     svg.append('</svg>')
     return "".join(svg).encode("utf-8")
 
+
+
+def _build_storyboard_pdf(final_script_result, product_name=""):
+    """Build a phone-friendly Chinese PDF, one storyboard card per page."""
+    storyboard = final_script_result.get("storyboard", []) if isinstance(final_script_result, dict) else []
+    if not storyboard:
+        return b""
+
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.enums import TA_CENTER
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.lib.units import mm
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+    except Exception:
+        return b""
+
+    try:
+        pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
+    except Exception:
+        pass
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=A4,
+        rightMargin=14 * mm,
+        leftMargin=14 * mm,
+        topMargin=14 * mm,
+        bottomMargin=14 * mm,
+        title="TikTok中文分镜图",
+        author="TikTok爆款视频解析&复盘专用",
+    )
+
+    styles = getSampleStyleSheet()
+    base_font = "STSong-Light"
+    title_style = ParagraphStyle(
+        "StoryboardTitle",
+        parent=styles["Title"],
+        fontName=base_font,
+        fontSize=19,
+        leading=25,
+        textColor=colors.HexColor("#111827"),
+        alignment=TA_CENTER,
+        spaceAfter=5 * mm,
+    )
+    sub_style = ParagraphStyle(
+        "StoryboardSub",
+        parent=styles["BodyText"],
+        fontName=base_font,
+        fontSize=10.5,
+        leading=16,
+        textColor=colors.HexColor("#6B7280"),
+        alignment=TA_CENTER,
+        spaceAfter=6 * mm,
+    )
+    head_style = ParagraphStyle(
+        "ShotHead",
+        parent=styles["Heading2"],
+        fontName=base_font,
+        fontSize=16,
+        leading=22,
+        textColor=colors.HexColor("#111827"),
+        spaceAfter=4 * mm,
+    )
+    label_style = ParagraphStyle(
+        "ShotLabel",
+        parent=styles["BodyText"],
+        fontName=base_font,
+        fontSize=11,
+        leading=18,
+        textColor=colors.HexColor("#111827"),
+    )
+    value_style = ParagraphStyle(
+        "ShotValue",
+        parent=styles["BodyText"],
+        fontName=base_font,
+        fontSize=11,
+        leading=18,
+        textColor=colors.HexColor("#374151"),
+    )
+    copy_style = ParagraphStyle(
+        "ShotCopy",
+        parent=value_style,
+        fontSize=12,
+        leading=20,
+        textColor=colors.HexColor("#111827"),
+    )
+
+    product_title = html.escape(clean_text(product_name) or "TikTok 爆款拍摄方案")
+    story = []
+
+    for idx, item in enumerate(storyboard):
+        seq = html.escape(clean_text(item.get("sequence")) or str(idx + 1))
+        time_range = html.escape(clean_text(item.get("time_range")) or "—")
+
+        story.append(Paragraph("中文分镜图｜拍摄 / 剪辑执行版", title_style))
+        story.append(Paragraph(f"{product_title} | 第 {seq} 镜 | {time_range}", sub_style))
+        story.append(Paragraph(f"第 {seq} 镜　{time_range}", head_style))
+
+        rows = [
+            ("机位 / 景别", item.get("shot", ""), False),
+            ("画面", item.get("visual", ""), False),
+            ("手部动作", item.get("hand_action", ""), False),
+            ("中文字幕 / 中文口播", item.get("copy_cn", ""), True),
+            ("剪辑 / 音效", item.get("audio", ""), False),
+            ("这一镜为什么拍", item.get("rationale", ""), False),
+        ]
+
+        table_data = []
+        for label, value, is_copy in rows:
+            value_text = html.escape(clean_text(value) or "—").replace("\n", "<br/>")
+            table_data.append([
+                Paragraph(f"<b>{html.escape(label)}</b>", label_style),
+                Paragraph(value_text, copy_style if is_copy else value_style),
+            ])
+
+        table = Table(table_data, colWidths=[42 * mm, 125 * mm], hAlign="CENTER")
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#F7F8FA")),
+            ("BACKGROUND", (1, 3), (1, 3), colors.HexColor("#FFF3F3")),
+            ("BOX", (0, 0), (-1, -1), 0.8, colors.HexColor("#E5E7EB")),
+            ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#ECEFF3")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 9),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 9),
+            ("TOPPADDING", (0, 0), (-1, -1), 9),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 9),
+        ]))
+        story.append(table)
+        story.append(Spacer(1, 4 * mm))
+        story.append(Paragraph("拍摄时按页顺序执行；剪辑可直接按每页动作、字幕与节奏提示对照处理。", sub_style))
+        if idx < len(storyboard) - 1:
+            story.append(PageBreak())
+
+    doc.build(story)
+    return buf.getvalue()
 
 def _init_sop1_state():
     defaults = {
@@ -1779,22 +1920,46 @@ if analysis_result:
 
         _render_storyboard_cards(final_script_result)
 
+        storyboard_pdf = _build_storyboard_pdf(
+            final_script_result,
+            product_name=product_name,
+        )
         storyboard_svg = _build_storyboard_svg(
             final_script_result,
             product_name=product_name,
         )
-        if storyboard_svg:
-            st.download_button(
-                "下载中文分镜图（SVG大图）",
-                data=storyboard_svg,
-                file_name=(
-                    "TikTok中文分镜图_"
-                    + datetime.now().strftime("%Y%m%d_%H%M")
-                    + ".svg"
-                ),
-                mime="image/svg+xml",
-                use_container_width=True,
-            )
+
+        pdf_col, svg_col = st.columns([1.35, 1])
+        with pdf_col:
+            if storyboard_pdf:
+                st.download_button(
+                    "下载中文分镜图（PDF｜手机推荐）",
+                    data=storyboard_pdf,
+                    file_name=(
+                        "TikTok中文分镜图_"
+                        + datetime.now().strftime("%Y%m%d_%H%M")
+                        + ".pdf"
+                    ),
+                    mime="application/pdf",
+                    type="primary",
+                    use_container_width=True,
+                )
+            else:
+                st.caption("PDF组件尚未安装，SVG仍可正常使用。")
+
+        with svg_col:
+            if storyboard_svg:
+                st.download_button(
+                    "下载SVG大图（备用）",
+                    data=storyboard_svg,
+                    file_name=(
+                        "TikTok中文分镜图_"
+                        + datetime.now().strftime("%Y%m%d_%H%M")
+                        + ".svg"
+                    ),
+                    mime="image/svg+xml",
+                    use_container_width=True,
+                )
 
 # --------------------------------------------------------
 # 页面状态与“工作记录”自动保存
