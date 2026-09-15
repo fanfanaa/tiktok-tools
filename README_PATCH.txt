@@ -1,18 +1,9 @@
-SOP1 爆款拆解｜完整时长英西双语字幕 + 简化机位版
+SOP1 AI参数异常修复
 
-本补丁包含：
-1. 原爆款视频字幕按实际完整时长输出，不再固定几十秒截断。
-2. 每段字幕同时输出英文 + 拉美西班牙语。
-3. Excel 增加英西双语字幕明细。
-4. 最终拍摄脚本同步输出英文 + 西班牙语字幕。
-5. 简化最终拍摄脚本机位：整条视频最多 1 个主机位 + 1 个补充特写机位。
-6. 画面丰富度优先通过动作、道具状态、Proof、前后对比实现，不再靠频繁换机位。
-7. 目标：一次架机，多拍动作，减少现场重新摆手机和重复布光。
+修复内容：
+1. 爆款拆解 max_output_tokens 从 16000 调整为 7800，避免 Gemini Flash-Lite 输出上限导致 400 INVALID_ARGUMENT。
+2. 最终脚本 max_output_tokens 从 8200 调整为 7600。
+3. subtitle_segments 移除 maxItems=80，降低结构化输出 Schema 复杂度；仍通过提示词要求覆盖原视频完整时长。
+4. 保留英/西双字幕、完整时长、简化机位逻辑。
 
-上传覆盖到 GitHub main：
-- gemini_sop1.py
-- sop1_schema.py
-- export_service.py
-- sop1_breakdown.py
-
-无需修改 requirements.txt / Supabase / Secrets / SOP2。
+部署：覆盖 main 的 gemini_sop1.py 与 sop1_schema.py。

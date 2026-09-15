@@ -78,7 +78,6 @@ VIDEO_ANALYSIS_SCHEMA = {
                     "subtitle_segments": {
                         "type": "array",
                         "minItems": 1,
-                        "maxItems": 80,
                         "items": {
                             "type": "object",
                             "properties": {

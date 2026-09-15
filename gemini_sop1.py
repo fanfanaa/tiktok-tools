@@ -270,7 +270,7 @@ def analyze_videos(client, uploaded_videos, category, product_name, input_sellin
                 "原视频字幕时间轴必须覆盖视频真实完整时长，1分钟以上的视频不得在30-40秒提前截断。"
             ),
             thinking_config=_thinking(),
-            max_output_tokens=16000,
+            max_output_tokens=7800,
             response_mime_type="application/json",
             response_json_schema=VIDEO_ANALYSIS_SCHEMA,
         )
@@ -356,7 +356,7 @@ def generate_final_script(
             "画面必须丰富，输出8-14个分镜。"
         ),
         thinking_config=_thinking(),
-        max_output_tokens=8200,
+        max_output_tokens=7600,
         response_mime_type="application/json",
         response_json_schema=FINAL_SCRIPT_SCHEMA,
     )
