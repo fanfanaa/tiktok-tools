@@ -9,7 +9,12 @@ from google.genai import types
 from config import SOP1_MODEL_CHAIN, MAX_COMPARE_VIDEOS, INLINE_BATCH_MAX_MB, SCENE_LIBRARY
 from common import clean_text, parse_json_output
 from gemini_base import generate_resilient as _base_generate_resilient, wait_until_active
-from sop1_schema import VIDEO_ANALYSIS_SCHEMA, DIRECTIONS_SCHEMA, FINAL_SCRIPT_SCHEMA
+from sop1_schema import (
+    VIDEO_ANALYSIS_SCHEMA,
+    SUBTITLE_TIMELINE_SCHEMA,
+    DIRECTIONS_SCHEMA,
+    FINAL_SCRIPT_SCHEMA,
+)
 
 
 def _thinking():
@@ -65,21 +70,6 @@ def build_video_analysis_prompt(category, product_name, filenames, input_selling
 10. 最值得吸收的3点。
 11. 参考价值判断。
 12. 推荐指数0-100。
-13. actual_duration_seconds：根据你实际看到的视频时间轴，给出整条视频的真实总时长（秒）。
-14. subtitle_segments：给剪辑直接使用的完整英/西双语字幕时间轴，必须从视频开头覆盖到视频结尾。
-
-【完整英/西双语字幕时间轴｜硬性要求】
-- subtitle_segments 不是只写前20-40秒，也不是只摘精彩片段；必须按原视频实际完整时长输出。
-- 例如视频实际约72秒，最后一条字幕的结束时间必须到约72秒附近；绝不能在30秒、40秒处提前结束。
-- 先通过视频时间轴判断 actual_duration_seconds，再生成字幕段；不要把“新拍摄脚本15-40秒”的限制套到原视频拆解上。
-- 每段必须包含 segment_no、time_range、copy_en、copy_es。
-- time_range 使用清晰格式，例如 0.0-3.2s、3.2-7.0s；时间必须连续递增，不得倒序，不得明显超出视频真实时长。
-- 按真实画面/语义变化拆段，通常每段约2-7秒；长句或连续同一语义可适当延长，但不要为了省字把几十秒塞成一段。
-- copy_en：自然美国英语，适合TikTok屏幕字幕/口播，可直接给剪辑使用；不是逐字机械转录时，也必须忠实对应当前画面表达。
-- copy_es：与 copy_en 同义、同一时间段，使用自然、简洁、适合美国西语受众阅读的拉美西班牙语；不要生硬直译。
-- 如果原视频本身没有口播/字幕，也要根据该时间段的画面和脚本意图生成“可剪字幕稿”，但不得虚构产品不存在的功能。
-- 输出JSON前必须自检：subtitle_segments 最后一段结束时间应与 actual_duration_seconds 基本一致（允许约1-2秒误差）。
-- 对于1分钟以上的视频，必须继续生成到视频真正结束；不要因为输出较长而主动截断。
 
 非常重要：
 - 爆款不等于完美，必须找短板，不能只写优势。
@@ -115,6 +105,31 @@ suggested_mode只是推荐，最终决定权属于使用人。
 最后推荐 recommended_reference_video_index，但只是AI推荐，最终由使用人选择。
 
 禁止虚构产品功能、TikTok后台数据、销量、认证、医疗效果；禁止复制原视频完整台词。
+严格按JSON Schema输出。
+""".strip()
+
+
+
+def build_subtitle_timeline_prompt(filename):
+    return f"""
+你正在为中国 TikTok Shop 剪辑团队生成一条原始参考视频的完整双语字幕时间轴。
+
+文件名：{filename}
+
+只完成这一件事：完整观看这条视频，从第0秒一直覆盖到视频真实结束时间，输出 English + Español 双语字幕。
+
+硬性要求：
+- actual_duration_seconds：根据视频真实时间轴填写完整总时长（秒），不要按30秒或40秒猜测。
+- subtitle_segments 必须覆盖整条视频；1分钟以上的视频也必须继续生成到真正结束。
+- 最后一段结束时间应与 actual_duration_seconds 基本一致，允许约1-2秒误差。
+- 每段包含 segment_no、time_range、copy_en、copy_es。
+- time_range 例如 0.0-3.2s、3.2-6.5s；必须连续递增，不倒序，不明显超出真实时长。
+- 通常按2-7秒一段，根据真实画面/语义变化拆分；不要把几十秒塞成一段。
+- copy_en：自然美国英语，适合TikTok屏幕字幕/口播，可直接给剪辑使用。
+- copy_es：与同段英文表达同一核心意思，使用自然、简洁的拉美西班牙语，面向美国西语受众，不做生硬逐词翻译。
+- 如果原视频没有口播/原字幕，也根据该时间段真实画面和脚本意图生成“可剪字幕稿”，但禁止虚构产品不存在的功能。
+- 不要输出优缺点、卖点分析、脚本诊断或其他内容，只输出Schema要求的字幕时间轴。
+
 严格按JSON Schema输出。
 """.strip()
 
@@ -241,12 +256,19 @@ def analyze_videos(client, uploaded_videos, category, product_name, input_sellin
     remote_files = []
     temp_paths = []
     try:
-        parts = []
+        analysis_parts = []
+        video_parts = []
+
         if total_mb <= INLINE_BATCH_MAX_MB:
             analysis_mode = "多视频快速解析"
             for index, video in enumerate(uploaded_videos, start=1):
-                parts.append(types.Part.from_text(text=f"【视频{index}】文件名：{video.name}"))
-                parts.append(types.Part.from_bytes(data=video.getvalue(), mime_type=video.type or "video/mp4"))
+                label = types.Part.from_text(text=f"【视频{index}】文件名：{video.name}")
+                media = types.Part.from_bytes(
+                    data=video.getvalue(),
+                    mime_type=video.type or "video/mp4",
+                )
+                analysis_parts.extend([label, media])
+                video_parts.append(media)
         else:
             analysis_mode = "多视频大文件解析"
             for index, video in enumerate(uploaded_videos, start=1):
@@ -258,30 +280,98 @@ def analyze_videos(client, uploaded_videos, category, product_name, input_sellin
                 remote_file = client.files.upload(file=temp_path)
                 remote_file = wait_until_active(client, remote_file)
                 remote_files.append(remote_file)
-                parts.append(types.Part.from_text(text=f"【视频{index}】文件名：{video.name}"))
-                parts.append(types.Part.from_uri(file_uri=remote_file.uri, mime_type=remote_file.mime_type or "video/mp4"))
+                label = types.Part.from_text(text=f"【视频{index}】文件名：{video.name}")
+                media = types.Part.from_uri(
+                    file_uri=remote_file.uri,
+                    mime_type=remote_file.mime_type or "video/mp4",
+                )
+                analysis_parts.extend([label, media])
+                video_parts.append(media)
 
-        parts.append(types.Part.from_text(text=prompt))
-        content = types.Content(role="user", parts=parts)
-        config = types.GenerateContentConfig(
+        # 第1步：只做爆款结构分析。不要把长字幕数组塞进这个复杂Schema，
+        # 避免 Gemini 因结构化输出复杂度直接返回 400。
+        analysis_parts.append(types.Part.from_text(text=prompt))
+        analysis_content = types.Content(role="user", parts=analysis_parts)
+        analysis_config = types.GenerateContentConfig(
             system_instruction=(
-                "你必须严格遵守语言规则：本次爆款拆解的分析字段使用简体中文；完整字幕时间轴必须同时输出自然美国英语和拉美西班牙语。"
-                "必须同时指出每条视频的优点和短板，不能只夸优点。"
-                "原视频字幕时间轴必须覆盖视频真实完整时长，1分钟以上的视频不得在30-40秒提前截断。"
+                "本次只做爆款结构分析。所有分析字段使用简体中文，必须同时指出优点和短板。"
+                "不要在本次响应中生成完整字幕时间轴。"
             ),
             thinking_config=_thinking(),
-            max_output_tokens=7800,
+            max_output_tokens=5200,
             response_mime_type="application/json",
             response_json_schema=VIDEO_ANALYSIS_SCHEMA,
         )
-        response, meta = generate_resilient(client, content, config)
+        response, analysis_meta = generate_resilient(
+            client,
+            analysis_content,
+            analysis_config,
+        )
         result = parse_json_output(response.text)
+
+        # 第2步：每条视频单独生成完整英/西双语字幕。
+        # 使用独立、很小的Schema，长视频也不会把主分析Schema撑爆。
+        subtitle_calls = []
+        analyzed_videos = result.get("videos", [])
+        for index, (uploaded_video, media_part) in enumerate(
+            zip(uploaded_videos, video_parts),
+            start=1,
+        ):
+            subtitle_prompt = build_subtitle_timeline_prompt(uploaded_video.name)
+            subtitle_content = types.Content(
+                role="user",
+                parts=[
+                    types.Part.from_text(
+                        text=f"【待生成字幕的视频{index}】文件名：{uploaded_video.name}"
+                    ),
+                    media_part,
+                    types.Part.from_text(text=subtitle_prompt),
+                ],
+            )
+            subtitle_config = types.GenerateContentConfig(
+                system_instruction=(
+                    "只生成完整英/西双语字幕时间轴。必须覆盖视频真实完整时长，"
+                    "1分钟以上也不得在30-40秒提前结束。"
+                ),
+                thinking_config=_thinking(),
+                max_output_tokens=6000,
+                response_mime_type="application/json",
+                response_json_schema=SUBTITLE_TIMELINE_SCHEMA,
+            )
+            subtitle_response, subtitle_meta = generate_resilient(
+                client,
+                subtitle_content,
+                subtitle_config,
+            )
+            subtitle_result = parse_json_output(subtitle_response.text)
+            subtitle_calls.append(subtitle_meta)
+
+            target = None
+            for video_result in analyzed_videos:
+                try:
+                    if int(video_result.get("video_index", 0)) == index:
+                        target = video_result
+                        break
+                except (TypeError, ValueError):
+                    pass
+            if target is None and index - 1 < len(analyzed_videos):
+                target = analyzed_videos[index - 1]
+            if target is not None:
+                target["actual_duration_seconds"] = subtitle_result.get(
+                    "actual_duration_seconds", ""
+                )
+                target["subtitle_segments"] = subtitle_result.get(
+                    "subtitle_segments", []
+                )
+
+        # 仍沿用主分析调用的模型信息；附带字幕调用次数，方便排查。
         return result, {
             "analysis_mode": analysis_mode,
             "total_size_mb": round(total_mb, 2),
             "video_count": len(uploaded_videos),
+            "subtitle_call_count": len(subtitle_calls),
             "analysis_seconds": round(time.perf_counter() - started, 1),
-            **meta,
+            **analysis_meta,
         }
     finally:
         for remote_file in remote_files:

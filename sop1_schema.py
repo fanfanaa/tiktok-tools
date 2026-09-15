@@ -74,26 +74,6 @@ VIDEO_ANALYSIS_SCHEMA = {
                     "age_estimate": {"type": "string"},
                     "first_3s_hook": {"type": "string"},
                     "visual_rhythm": {"type": "string"},
-                    "actual_duration_seconds": {"type": "number"},
-                    "subtitle_segments": {
-                        "type": "array",
-                        "minItems": 1,
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "segment_no": {"type": "integer"},
-                                "time_range": {"type": "string"},
-                                "copy_en": {"type": "string"},
-                                "copy_es": {"type": "string"},
-                            },
-                            "required": [
-                                "segment_no",
-                                "time_range",
-                                "copy_en",
-                                "copy_es",
-                            ],
-                        },
-                    },
                     "strengths": {
                         "type": "array",
                         "minItems": 2,
@@ -129,8 +109,6 @@ VIDEO_ANALYSIS_SCHEMA = {
                     "age_estimate",
                     "first_3s_hook",
                     "visual_rhythm",
-                    "actual_duration_seconds",
-                    "subtitle_segments",
                     "strengths",
                     "weaknesses",
                     "top_absorb_points",
@@ -149,6 +127,36 @@ VIDEO_ANALYSIS_SCHEMA = {
         "common_inferred_selling_points",
         "recommended_reference_video_index",
         "videos",
+    ],
+}
+
+
+SUBTITLE_TIMELINE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "actual_duration_seconds": {"type": "number"},
+        "subtitle_segments": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "segment_no": {"type": "integer"},
+                    "time_range": {"type": "string"},
+                    "copy_en": {"type": "string"},
+                    "copy_es": {"type": "string"},
+                },
+                "required": [
+                    "segment_no",
+                    "time_range",
+                    "copy_en",
+                    "copy_es",
+                ],
+            },
+        },
+    },
+    "required": [
+        "actual_duration_seconds",
+        "subtitle_segments",
     ],
 }
 
