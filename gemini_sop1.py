@@ -65,6 +65,21 @@ def build_video_analysis_prompt(category, product_name, filenames, input_selling
 10. 最值得吸收的3点。
 11. 参考价值判断。
 12. 推荐指数0-100。
+13. actual_duration_seconds：根据你实际看到的视频时间轴，给出整条视频的真实总时长（秒）。
+14. subtitle_segments：给剪辑直接使用的完整英/西双语字幕时间轴，必须从视频开头覆盖到视频结尾。
+
+【完整英/西双语字幕时间轴｜硬性要求】
+- subtitle_segments 不是只写前20-40秒，也不是只摘精彩片段；必须按原视频实际完整时长输出。
+- 例如视频实际约72秒，最后一条字幕的结束时间必须到约72秒附近；绝不能在30秒、40秒处提前结束。
+- 先通过视频时间轴判断 actual_duration_seconds，再生成字幕段；不要把“新拍摄脚本15-40秒”的限制套到原视频拆解上。
+- 每段必须包含 segment_no、time_range、copy_en、copy_es。
+- time_range 使用清晰格式，例如 0.0-3.2s、3.2-7.0s；时间必须连续递增，不得倒序，不得明显超出视频真实时长。
+- 按真实画面/语义变化拆段，通常每段约2-7秒；长句或连续同一语义可适当延长，但不要为了省字把几十秒塞成一段。
+- copy_en：自然美国英语，适合TikTok屏幕字幕/口播，可直接给剪辑使用；不是逐字机械转录时，也必须忠实对应当前画面表达。
+- copy_es：与 copy_en 同义、同一时间段，使用自然、简洁、适合美国西语受众阅读的拉美西班牙语；不要生硬直译。
+- 如果原视频本身没有口播/字幕，也要根据该时间段的画面和脚本意图生成“可剪字幕稿”，但不得虚构产品不存在的功能。
+- 输出JSON前必须自检：subtitle_segments 最后一段结束时间应与 actual_duration_seconds 基本一致（允许约1-2秒误差）。
+- 对于1分钟以上的视频，必须继续生成到视频真正结束；不要因为输出较长而主动截断。
 
 非常重要：
 - 爆款不等于完美，必须找短板，不能只写优势。
@@ -159,7 +174,7 @@ def build_final_script_prompt(
     return f"""
 你是美国 TikTok Shop 中文拍摄SOP导演。这是给中国拍摄团队直接执行的脚本。
 
-语言规则：除 copy_en 字段外，shooting_notes、shot、visual、hand_action、copy_cn、audio、absorb_point、difference_point、rationale 全部必须中文。只有 copy_en 使用自然美国英语。
+语言规则：shooting_notes、shot、visual、hand_action、copy_cn、audio、absorb_point、difference_point、rationale 全部必须中文。copy_en 使用自然美国英语；copy_es 使用自然、简洁、适合美国西语受众的拉美西班牙语。
 
 产品：{category} / {product_name}
 最终确认卖点：{effective_selling_points}
@@ -178,27 +193,34 @@ def build_final_script_prompt(
 
 视频时长15-40秒。
 
-【画面丰富度硬性要求】
-- 输出8-14个分镜，不允许只有少量大段镜头。
-- 前3秒至少出现2-3次可感知的画面/动作变化。
-- 平均每1.5-3秒至少变化一个维度：机位、景别、手部动作、道具状态、产品状态、前后对比、Proof展示。
-- 同一个小场景内完成，不靠频繁换地点制造丰富度。
-- 必须混合：POV操作、手部近景、产品微距、结果特写、前后对比/Proof、拿取/放回/开合/滚动/撕/推/按等动作。
+【画面丰富度 + 简化机位硬性要求】
+- 输出8-14个分镜，但整条视频最多只允许2个实际拍摄机位：1个主机位 + 1个补充特写机位。
+- 用户选择的“实际视角”就是整条视频的主视角，不要擅自来回切换第一人称、第三人称、俯拍、侧拍、过肩、低机位等复杂视角。
+- 默认优先只用1个主机位完成大部分素材；只有产品细节、Proof结果确实看不清时，才允许增加1个固定补充近景。
+- 同一个机位连续拍多个动作素材，再通过剪辑切段；不要为了每个分镜都重新移动手机、重新架机位。
+- 前3秒至少出现2-3次可感知变化，但优先通过手部动作、道具状态、产品状态、前后对比、推进/拿取/开合等完成，不依赖换机位。
+- 平均每1.5-3秒至少变化一个“内容维度”：手部动作、道具状态、产品状态、前后对比、Proof、字幕信息；机位变化不是必选项。
+- 同一个小场景内完成，不靠频繁换地点或频繁换角度制造丰富度。
+- 禁止把脚本设计成需要频繁俯拍/侧拍/低角度/过肩/微距反复切换的专业拍摄方案。
+- shot 字段只使用简洁、统一的机位名称，例如“主机位｜第一人称POV”“主机位｜第三人称手部”“补充特写｜产品结果”，不要写复杂摄影术语。
+- 每个 visual 重点写清：道具 + 动作 + 画面变化/结果；除非切到补充特写，否则默认沿用主机位，不要重复描述复杂机位。
 - 不要连续多个镜头只是“产品摆拍”或重复同一个动作。
-- 每个 visual 必须写清：机位 + 道具 + 动作 + 画面变化/结果，让剪辑能直接按描述找镜头。
 
-【英文字幕/口播硬性要求】
+【英/西双语字幕/口播硬性要求】
+- 每个分镜必须同时输出 copy_en + copy_es，两者表达同一核心意思、适配同一时间段。
 - copy_en 不是一句两三个词的占位字幕，而是给剪辑挑选的“可剪字幕池”。
+- copy_es 必须是自然拉美西班牙语，面向美国西语受众；优先自然表达，不做逐词硬翻。
 - 每个分镜通常给5-14个英文单词；关键镜头可给1-2个短句。
 - 默认20-30秒视频，整条英文素材总量目标约65-100词；15-20秒约45-70词；30-40秒约90-130词。
-- 宁可比最终成片多20%-30%的英文素材，方便剪辑删减，也不要少到无法选择。
+- 西班牙语字幕与英文字幕逐镜对应，信息量保持相近，但允许为阅读速度做自然压缩。
+- 宁可比最终成片多20%-30%的双语素材，方便剪辑删减，也不要少到无法选择。
 - 必须自然美国口语、TikTok风格、短句、可直接上字幕；不要广告说明书语气。
 - 不要每个镜头重复同一句卖点，要形成信息递进：Hook → 痛点 → 解决 → Proof → 使用场景/理由 → CTA。
 
-0-3秒必须强Hook且有明显动作；产品尽快出现；必须真实UGC；必须可以在民宿直接拍；不需要专业摄影设备；每个动作必须具体，不要写抽象脚本。
+0-3秒必须强Hook且有明显动作；产品尽快出现；必须真实UGC；必须可以在民宿直接拍；不需要专业摄影设备。整条视频应尽量“一次架机，多拍动作”，减少重新摆机位和重复布光；每个动作必须具体，不要写抽象脚本。
 
 每个分镜输出：
-sequence、time_range、shot、visual、hand_action、copy_cn、copy_en、audio、absorb_point、difference_point、rationale。
+sequence、time_range、shot、visual、hand_action、copy_cn、copy_en、copy_es、audio、absorb_point、difference_point、rationale。
 
 严格按JSON Schema。
 """.strip()
@@ -243,11 +265,12 @@ def analyze_videos(client, uploaded_videos, category, product_name, input_sellin
         content = types.Content(role="user", parts=parts)
         config = types.GenerateContentConfig(
             system_instruction=(
-                "你必须严格遵守语言规则：本次爆款拆解所有分析字段必须使用简体中文。"
+                "你必须严格遵守语言规则：本次爆款拆解的分析字段使用简体中文；完整字幕时间轴必须同时输出自然美国英语和拉美西班牙语。"
                 "必须同时指出每条视频的优点和短板，不能只夸优点。"
+                "原视频字幕时间轴必须覆盖视频真实完整时长，1分钟以上的视频不得在30-40秒提前截断。"
             ),
             thinking_config=_thinking(),
-            max_output_tokens=7600,
+            max_output_tokens=16000,
             response_mime_type="application/json",
             response_json_schema=VIDEO_ANALYSIS_SCHEMA,
         )
@@ -328,11 +351,12 @@ def generate_final_script(
     )
     config = types.GenerateContentConfig(
         system_instruction=(
-            "这是给中国团队执行的拍摄脚本。除copy_en字段之外所有字段必须使用简体中文。"
-            "copy_en必须提供足量、可供剪辑删选的自然美国英语；画面必须丰富，输出8-14个分镜。"
+            "这是给中国团队执行的拍摄脚本。分析与执行字段必须使用简体中文。"
+            "copy_en必须提供足量、可供剪辑删选的自然美国英语；copy_es必须提供对应的自然拉美西班牙语。"
+            "画面必须丰富，输出8-14个分镜。"
         ),
         thinking_config=_thinking(),
-        max_output_tokens=6800,
+        max_output_tokens=8200,
         response_mime_type="application/json",
         response_json_schema=FINAL_SCRIPT_SCHEMA,
     )

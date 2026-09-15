@@ -169,6 +169,58 @@ def analysis_videos_to_df(
         columns=ANALYSIS_VIDEO_COLUMNS,
     )
 
+def analysis_subtitles_to_df(
+    result,
+):
+
+    rows = []
+
+    for video in result.get(
+        "videos",
+        [],
+    ):
+        video_index = video.get(
+            "video_index",
+            "",
+        )
+        filename = video.get(
+            "filename",
+            "",
+        )
+        duration = video.get(
+            "actual_duration_seconds",
+            "",
+        )
+
+        for segment in video.get(
+            "subtitle_segments",
+            [],
+        ):
+            rows.append(
+                {
+                    "视频编号": video_index,
+                    "文件名": filename,
+                    "视频实际时长(秒)": duration,
+                    "字幕段序": segment.get("segment_no", ""),
+                    "时间段": segment.get("time_range", ""),
+                    "英文字幕": segment.get("copy_en", ""),
+                    "西班牙语字幕": segment.get("copy_es", ""),
+                }
+            )
+
+    return pd.DataFrame(
+        rows,
+        columns=[
+            "视频编号",
+            "文件名",
+            "视频实际时长(秒)",
+            "字幕段序",
+            "时间段",
+            "英文字幕",
+            "西班牙语字幕",
+        ],
+    )
+
 def directions_summary_to_df(
     result,
 ):
@@ -312,6 +364,12 @@ def final_script_to_df(
                         "",
                     ),
 
+                "西班牙语口播/字幕":
+                    shot.get(
+                        "copy_es",
+                        "",
+                    ),
+
                 "音效/节奏提示":
                     shot.get(
                         "audio",
@@ -338,9 +396,17 @@ def final_script_to_df(
             }
         )
 
+    final_columns = list(FINAL_SCRIPT_COLUMNS)
+    if "西班牙语口播/字幕" not in final_columns:
+        try:
+            english_index = final_columns.index("英文口播/字幕")
+            final_columns.insert(english_index + 1, "西班牙语口播/字幕")
+        except ValueError:
+            final_columns.append("西班牙语口播/字幕")
+
     return pd.DataFrame(
         rows,
-        columns=FINAL_SCRIPT_COLUMNS,
+        columns=final_columns,
     )
 
 def review_script_to_df(
@@ -546,6 +612,17 @@ def build_analysis_export_excel(
             sheet_name="逐条视频拆解",
         )
 
+        subtitle_df = analysis_subtitles_to_df(
+            analysis_result
+        )
+
+        if not subtitle_df.empty:
+            subtitle_df.to_excel(
+                writer,
+                index=False,
+                sheet_name="英西双语字幕",
+            )
+
         format_sheet(
             writer.book[
                 "爆款对比总结"
@@ -557,6 +634,13 @@ def build_analysis_export_excel(
                 "逐条视频拆解"
             ]
         )
+
+        if not subtitle_df.empty:
+            format_sheet(
+                writer.book[
+                    "英西双语字幕"
+                ]
+            )
 
         if directions_result:
 

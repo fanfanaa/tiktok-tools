@@ -49,232 +49,109 @@ def _storyboard_text(value):
     return html.escape(clean_text(value) or "—")
 
 
-def _render_storyboard_cards(final_script_result):
-    """Render the final script as visual Chinese cards for filming/editing."""
+def _render_storyboard_overview(final_script_result, selected_scene="", selected_perspective=""):
+    """Render one consolidated shooting-only storyboard overview for the whole script."""
     storyboard = final_script_result.get("storyboard", []) if isinstance(final_script_result, dict) else []
     if not storyboard:
         return
 
+    scene = _storyboard_text(selected_scene)
+    perspective = _storyboard_text(selected_perspective)
+
     st.markdown(
         """
         <style>
-        .shot-card {
-            border: 1px solid #e7e9ee;
+        .shoot-board {
+            border: 1px solid #e5e7eb;
             border-radius: 16px;
             background: #ffffff;
-            padding: 18px 18px 16px 18px;
-            margin: 0 0 16px 0;
+            overflow: hidden;
             box-shadow: 0 2px 10px rgba(20, 24, 40, 0.05);
-            min-height: 340px;
         }
-        .shot-card-head {
-            display:flex;
-            align-items:center;
-            justify-content:space-between;
-            gap:12px;
-            margin-bottom:12px;
-            padding-bottom:10px;
-            border-bottom:1px solid #f0f1f4;
+        .shoot-board-head {
+            padding: 16px 18px;
+            background: #f7f8fa;
+            border-bottom: 1px solid #e5e7eb;
+            font-size: 14px;
+            line-height: 1.7;
+            color: #374151;
         }
-        .shot-card-title {
-            font-size:18px;
-            font-weight:800;
-            color:#1f2937;
+        .shoot-board-head b { color: #111827; }
+        .shoot-row {
+            display: grid;
+            grid-template-columns: 86px 1.05fr 2.2fr 1.35fr;
+            border-bottom: 1px solid #edf0f3;
         }
-        .shot-card-time {
-            flex:0 0 auto;
-            font-size:13px;
-            font-weight:700;
-            color:#ff4b4b;
-            background:#fff0f0;
-            border-radius:999px;
-            padding:5px 10px;
+        .shoot-row:last-child { border-bottom: 0; }
+        .shoot-cell {
+            padding: 13px 12px;
+            font-size: 13px;
+            line-height: 1.65;
+            color: #374151;
+            border-right: 1px solid #edf0f3;
+            word-break: break-word;
         }
-        .shot-card-row {
-            margin:9px 0;
-            font-size:14px;
-            line-height:1.65;
-            color:#374151;
+        .shoot-cell:last-child { border-right: 0; }
+        .shoot-index {
+            background: #fff5f5;
+            color: #111827;
+            font-weight: 800;
         }
-        .shot-card-label {
-            font-weight:800;
-            color:#111827;
-            margin-right:5px;
+        .shoot-time {
+            display: block;
+            margin-top: 4px;
+            color: #ff4b4b;
+            font-size: 12px;
+            font-weight: 700;
         }
-        .shot-card-copy {
-            margin-top:12px;
-            padding:12px 14px;
-            border-radius:12px;
-            background:#f7f8fa;
-            font-size:15px;
-            line-height:1.7;
-            color:#111827;
-            font-weight:650;
+        .shoot-label {
+            display: block;
+            margin-bottom: 4px;
+            color: #111827;
+            font-weight: 800;
+            font-size: 12px;
         }
-        .shot-card-foot {
-            margin-top:12px;
-            padding-top:10px;
-            border-top:1px dashed #e5e7eb;
-            font-size:13px;
-            line-height:1.6;
-            color:#6b7280;
+        @media (max-width: 760px) {
+            .shoot-row { grid-template-columns: 72px 1fr; }
+            .shoot-cell:nth-child(2), .shoot-cell:nth-child(4) { border-right: 0; }
+            .shoot-cell:nth-child(3), .shoot-cell:nth-child(4) { grid-column: 2; }
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    cols = st.columns(2)
+    rows = []
     for index, item in enumerate(storyboard):
         sequence = _storyboard_text(item.get("sequence") or str(index + 1))
         time_range = _storyboard_text(item.get("time_range"))
         shot = _storyboard_text(item.get("shot"))
         visual = _storyboard_text(item.get("visual"))
         hand_action = _storyboard_text(item.get("hand_action"))
-        copy_cn = _storyboard_text(item.get("copy_cn"))
-        audio = _storyboard_text(item.get("audio"))
-        rationale = _storyboard_text(item.get("rationale"))
+        rows.append(
+            f"""
+            <div class="shoot-row">
+              <div class="shoot-cell shoot-index">第{sequence}镜<span class="shoot-time">{time_range}</span></div>
+              <div class="shoot-cell"><span class="shoot-label">机位 / 景别</span>{shot}</div>
+              <div class="shoot-cell"><span class="shoot-label">拍什么</span>{visual}</div>
+              <div class="shoot-cell"><span class="shoot-label">怎么拍 / 手部动作</span>{hand_action}</div>
+            </div>
+            """
+        )
 
-        card = f"""
-        <div class="shot-card">
-          <div class="shot-card-head">
-            <div class="shot-card-title">🎬 第{sequence}镜</div>
-            <div class="shot-card-time">{time_range}</div>
-          </div>
-          <div class="shot-card-row"><span class="shot-card-label">📷 机位 / 景别：</span>{shot}</div>
-          <div class="shot-card-row"><span class="shot-card-label">🖼️ 画面：</span>{visual}</div>
-          <div class="shot-card-row"><span class="shot-card-label">✋ 手部动作：</span>{hand_action}</div>
-          <div class="shot-card-copy"><span class="shot-card-label">💬 中文字幕 / 中文口播：</span>{copy_cn}</div>
-          <div class="shot-card-row"><span class="shot-card-label">🎵 剪辑 / 音效：</span>{audio}</div>
-          <div class="shot-card-foot"><span class="shot-card-label">🎯 这一镜为什么拍：</span>{rationale}</div>
-        </div>
-        """
-        with cols[index % 2]:
-            st.markdown(card, unsafe_allow_html=True)
+    board = f"""
+    <div class="shoot-board">
+      <div class="shoot-board-head">
+        <b>拍摄场景：</b>{scene}　　<b>主视角：</b>{perspective}<br/>
+        一张总览完成一条拍摄脚本。这里只保留拍摄人员需要执行的内容，不包含剪辑、音效、设计逻辑。
+      </div>
+      {''.join(rows)}
+    </div>
+    """
+    st.markdown(board, unsafe_allow_html=True)
 
-
-def _wrap_storyboard_lines(value, width=24, max_lines=8):
-    text = clean_text(value) or "—"
-    # Chinese storyboard text is best wrapped by character count, while preserving existing line breaks.
-    lines = []
-    for raw_line in str(text).splitlines() or [str(text)]:
-        raw_line = raw_line.strip()
-        if not raw_line:
-            continue
-        while raw_line:
-            lines.append(raw_line[:width])
-            raw_line = raw_line[width:]
-            if len(lines) >= max_lines:
-                break
-        if len(lines) >= max_lines:
-            break
-    if not lines:
-        lines = ["—"]
-    return lines
-
-
-def _svg_text_block(x, y, label, value, width=24, font_size=27, line_height=38, max_lines=8):
-    lines = _wrap_storyboard_lines(value, width=width, max_lines=max_lines)
-    safe_label = html.escape(label)
-    parts = [
-        f'<text x="{x}" y="{y}" font-size="{font_size}" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, Arial, sans-serif" fill="#111827">',
-        f'<tspan font-weight="700">{safe_label}</tspan>',
-    ]
-    first = True
-    for line in lines:
-        safe_line = html.escape(line)
-        if first:
-            parts.append(f'<tspan dx="10">{safe_line}</tspan>')
-            first = False
-        else:
-            parts.append(f'<tspan x="{x}" dy="{line_height}">{safe_line}</tspan>')
-    parts.append('</text>')
-    height = max(1, len(lines)) * line_height
-    return "".join(parts), height
-
-
-def _build_storyboard_svg(final_script_result, product_name=""):
-    """Create a real downloadable SVG storyboard image; no extra AI/API call required."""
-    storyboard = final_script_result.get("storyboard", []) if isinstance(final_script_result, dict) else []
-    if not storyboard:
-        return b""
-
-    canvas_w = 1600
-    margin = 58
-    gap = 34
-    card_w = (canvas_w - margin * 2 - gap) // 2
-    header_h = 160
-
-    cards = []
-    for idx, item in enumerate(storyboard):
-        fields = [
-            ("机位/景别：", item.get("shot", ""), 24, 5),
-            ("画面：", item.get("visual", ""), 24, 8),
-            ("手部动作：", item.get("hand_action", ""), 24, 6),
-            ("中文字幕/口播：", item.get("copy_cn", ""), 22, 6),
-            ("剪辑/音效：", item.get("audio", ""), 24, 5),
-            ("这一镜为什么拍：", item.get("rationale", ""), 24, 5),
-        ]
-        estimated = 112
-        for _, value, width, max_lines in fields:
-            estimated += min(max_lines, max(1, (len(clean_text(value) or "—") + width - 1) // width)) * 38 + 28
-        cards.append((item, max(520, estimated)))
-
-    # Row positions use the taller card in each pair.
-    row_heights = []
-    for i in range(0, len(cards), 2):
-        pair = cards[i:i+2]
-        row_heights.append(max(h for _, h in pair))
-    canvas_h = header_h + margin + sum(row_heights) + gap * max(0, len(row_heights) - 1) + margin
-
-    svg = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{canvas_w}" height="{canvas_h}" viewBox="0 0 {canvas_w} {canvas_h}">',
-        '<rect width="100%" height="100%" fill="#f6f7f9"/>',
-        f'<text x="{margin}" y="68" font-size="42" font-weight="800" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, Arial, sans-serif" fill="#111827">中文分镜图｜拍摄 / 剪辑执行版</text>',
-        f'<text x="{margin}" y="116" font-size="24" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, Arial, sans-serif" fill="#6b7280">{html.escape(clean_text(product_name) or "TikTok 爆款拍摄方案")} · 每镜一卡 · 现场按顺序执行</text>',
-    ]
-
-    y = header_h
-    card_index = 0
-    for row_idx, row_h in enumerate(row_heights):
-        for col_idx in range(2):
-            if card_index >= len(cards):
-                break
-            item, card_h = cards[card_index]
-            x = margin + col_idx * (card_w + gap)
-            sequence = html.escape(clean_text(item.get("sequence")) or str(card_index + 1))
-            time_range = html.escape(clean_text(item.get("time_range")) or "—")
-
-            svg.append(f'<rect x="{x}" y="{y}" width="{card_w}" height="{card_h}" rx="22" fill="#ffffff" stroke="#e5e7eb" stroke-width="2"/>')
-            svg.append(f'<rect x="{x}" y="{y}" width="{card_w}" height="76" rx="22" fill="#fff0f0"/>')
-            # Mask lower rounded edge of header for a clean straight divider.
-            svg.append(f'<rect x="{x}" y="{y+54}" width="{card_w}" height="22" fill="#fff0f0"/>')
-            svg.append(f'<text x="{x+26}" y="{y+50}" font-size="31" font-weight="800" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, Arial, sans-serif" fill="#111827">第{sequence}镜</text>')
-            svg.append(f'<text x="{x+card_w-26}" y="{y+50}" text-anchor="end" font-size="24" font-weight="700" font-family="Microsoft YaHei, PingFang SC, Noto Sans CJK SC, Arial, sans-serif" fill="#ff4b4b">{time_range}</text>')
-
-            cursor_y = y + 118
-            sections = [
-                ("机位/景别：", item.get("shot", ""), 24, 5),
-                ("画面：", item.get("visual", ""), 24, 8),
-                ("手部动作：", item.get("hand_action", ""), 24, 6),
-                ("中文字幕/口播：", item.get("copy_cn", ""), 22, 6),
-                ("剪辑/音效：", item.get("audio", ""), 24, 5),
-                ("这一镜为什么拍：", item.get("rationale", ""), 24, 5),
-            ]
-            for label, value, width, max_lines in sections:
-                block, block_h = _svg_text_block(x+26, cursor_y, label, value, width=width, max_lines=max_lines)
-                svg.append(block)
-                cursor_y += block_h + 28
-            card_index += 1
-        y += row_h + gap
-
-    svg.append('</svg>')
-    return "".join(svg).encode("utf-8")
-
-
-
-def _build_storyboard_pdf(final_script_result, product_name=""):
-    """Build a phone-friendly Chinese PDF, one storyboard card per page."""
+def _build_storyboard_pdf(final_script_result, product_name="", selected_scene="", selected_perspective=""):
+    """Build one long single-page PDF containing the whole shooting script only."""
     storyboard = final_script_result.get("storyboard", []) if isinstance(final_script_result, dict) else []
     if not storyboard:
         return b""
@@ -282,12 +159,11 @@ def _build_storyboard_pdf(final_script_result, product_name=""):
     try:
         from reportlab.lib import colors
         from reportlab.lib.enums import TA_CENTER
-        from reportlab.lib.pagesizes import A4
         from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
         from reportlab.lib.units import mm
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
     except Exception:
         return b""
 
@@ -296,118 +172,128 @@ def _build_storyboard_pdf(final_script_result, product_name=""):
     except Exception:
         pass
 
+    # One final script = one PDF page. Estimate height from actual text so the
+    # page stays compact instead of leaving a large blank area on phones.
+    import math
+    page_w = 210 * mm
+    estimated_rows_mm = 0
+    for item in storyboard:
+        shot_text = clean_text(item.get("shot")) or "—"
+        visual_text = clean_text(item.get("visual")) or "—"
+        hand_text = clean_text(item.get("hand_action")) or "—"
+        line_count = max(
+            2,
+            math.ceil(len(shot_text) / 11),
+            math.ceil(len(visual_text) / 20),
+            math.ceil(len(hand_text) / 12),
+        )
+        estimated_rows_mm += max(15, 6 + line_count * 5.2)
+    page_h = (100 + estimated_rows_mm) * mm
+
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf,
-        pagesize=A4,
-        rightMargin=14 * mm,
-        leftMargin=14 * mm,
-        topMargin=14 * mm,
-        bottomMargin=14 * mm,
-        title="TikTok中文分镜图",
+        pagesize=(page_w, page_h),
+        rightMargin=9 * mm,
+        leftMargin=9 * mm,
+        topMargin=10 * mm,
+        bottomMargin=10 * mm,
+        title="TikTok拍摄分镜总览",
         author="TikTok爆款视频解析&复盘专用",
     )
 
     styles = getSampleStyleSheet()
     base_font = "STSong-Light"
     title_style = ParagraphStyle(
-        "StoryboardTitle",
+        "ShootBoardTitle",
         parent=styles["Title"],
         fontName=base_font,
-        fontSize=19,
-        leading=25,
+        fontSize=18,
+        leading=24,
         textColor=colors.HexColor("#111827"),
         alignment=TA_CENTER,
-        spaceAfter=5 * mm,
+        spaceAfter=3 * mm,
     )
     sub_style = ParagraphStyle(
-        "StoryboardSub",
+        "ShootBoardSub",
         parent=styles["BodyText"],
         fontName=base_font,
-        fontSize=10.5,
-        leading=16,
+        fontSize=9.5,
+        leading=14,
         textColor=colors.HexColor("#6B7280"),
         alignment=TA_CENTER,
-        spaceAfter=6 * mm,
-    )
-    head_style = ParagraphStyle(
-        "ShotHead",
-        parent=styles["Heading2"],
-        fontName=base_font,
-        fontSize=16,
-        leading=22,
-        textColor=colors.HexColor("#111827"),
         spaceAfter=4 * mm,
     )
-    label_style = ParagraphStyle(
-        "ShotLabel",
+    cell_style = ParagraphStyle(
+        "ShootCell",
         parent=styles["BodyText"],
         fontName=base_font,
-        fontSize=11,
-        leading=18,
-        textColor=colors.HexColor("#111827"),
-    )
-    value_style = ParagraphStyle(
-        "ShotValue",
-        parent=styles["BodyText"],
-        fontName=base_font,
-        fontSize=11,
-        leading=18,
+        fontSize=9.2,
+        leading=14.5,
         textColor=colors.HexColor("#374151"),
     )
-    copy_style = ParagraphStyle(
-        "ShotCopy",
-        parent=value_style,
-        fontSize=12,
-        leading=20,
+    head_cell_style = ParagraphStyle(
+        "ShootHeadCell",
+        parent=cell_style,
+        fontSize=9.4,
+        leading=14.5,
         textColor=colors.HexColor("#111827"),
     )
 
     product_title = html.escape(clean_text(product_name) or "TikTok 爆款拍摄方案")
-    story = []
+    scene = html.escape(clean_text(selected_scene) or "—")
+    perspective = html.escape(clean_text(selected_perspective) or "—")
+
+    story = [
+        Paragraph("拍摄分镜总览｜一条脚本一张", title_style),
+        Paragraph(
+            f"{product_title}　|　场景：{scene}　|　视角：{perspective}<br/>"
+            "仅保留拍摄执行信息：镜头时间、机位景别、画面、手部动作。",
+            sub_style,
+        ),
+    ]
+
+    header = [
+        Paragraph("镜头 / 时间", head_cell_style),
+        Paragraph("机位 / 景别", head_cell_style),
+        Paragraph("拍什么", head_cell_style),
+        Paragraph("怎么拍 / 手部动作", head_cell_style),
+    ]
+    data = [header]
 
     for idx, item in enumerate(storyboard):
         seq = html.escape(clean_text(item.get("sequence")) or str(idx + 1))
         time_range = html.escape(clean_text(item.get("time_range")) or "—")
+        shot = html.escape(clean_text(item.get("shot")) or "—").replace("\n", "<br/>")
+        visual = html.escape(clean_text(item.get("visual")) or "—").replace("\n", "<br/>")
+        hand_action = html.escape(clean_text(item.get("hand_action")) or "—").replace("\n", "<br/>")
+        data.append([
+            Paragraph(f"<b>第{seq}镜</b><br/><font color='#FF4B4B'>{time_range}</font>", cell_style),
+            Paragraph(shot, cell_style),
+            Paragraph(visual, cell_style),
+            Paragraph(hand_action, cell_style),
+        ])
 
-        story.append(Paragraph("中文分镜图｜拍摄 / 剪辑执行版", title_style))
-        story.append(Paragraph(f"{product_title} | 第 {seq} 镜 | {time_range}", sub_style))
-        story.append(Paragraph(f"第 {seq} 镜　{time_range}", head_style))
-
-        rows = [
-            ("机位 / 景别", item.get("shot", ""), False),
-            ("画面", item.get("visual", ""), False),
-            ("手部动作", item.get("hand_action", ""), False),
-            ("中文字幕 / 中文口播", item.get("copy_cn", ""), True),
-            ("剪辑 / 音效", item.get("audio", ""), False),
-            ("这一镜为什么拍", item.get("rationale", ""), False),
-        ]
-
-        table_data = []
-        for label, value, is_copy in rows:
-            value_text = html.escape(clean_text(value) or "—").replace("\n", "<br/>")
-            table_data.append([
-                Paragraph(f"<b>{html.escape(label)}</b>", label_style),
-                Paragraph(value_text, copy_style if is_copy else value_style),
-            ])
-
-        table = Table(table_data, colWidths=[42 * mm, 125 * mm], hAlign="CENTER")
-        table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#F7F8FA")),
-            ("BACKGROUND", (1, 3), (1, 3), colors.HexColor("#FFF3F3")),
-            ("BOX", (0, 0), (-1, -1), 0.8, colors.HexColor("#E5E7EB")),
-            ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#ECEFF3")),
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 9),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 9),
-            ("TOPPADDING", (0, 0), (-1, -1), 9),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 9),
-        ]))
-        story.append(table)
-        story.append(Spacer(1, 4 * mm))
-        story.append(Paragraph("拍摄时按页顺序执行；剪辑可直接按每页动作、字幕与节奏提示对照处理。", sub_style))
-        if idx < len(storyboard) - 1:
-            story.append(PageBreak())
+    table = Table(
+        data,
+        colWidths=[25 * mm, 42 * mm, 78 * mm, 47 * mm],
+        repeatRows=1,
+        hAlign="CENTER",
+    )
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F3F4F6")),
+        ("BACKGROUND", (0, 1), (0, -1), colors.HexColor("#FFF5F5")),
+        ("BOX", (0, 0), (-1, -1), 0.8, colors.HexColor("#DDE1E6")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.45, colors.HexColor("#E5E7EB")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 7),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+    ]))
+    story.append(table)
+    story.append(Spacer(1, 3 * mm))
+    story.append(Paragraph("现场按第1镜到最后一镜顺序拍摄即可。", sub_style))
 
     doc.build(story)
     return buf.getvalue()
@@ -434,7 +320,7 @@ SOP1_FINAL_TASK_KEY = task_key("sop1_final_script")
 if not api_key:
     st.error("系统未配置 Gemini API Key，请联系管理员。")
 
-st.caption("爆款拆解｜爆款分析 → 选择卖点 → 3个方向 → 最终拍摄脚本 → 中文分镜图")
+st.caption("爆款拆解｜爆款分析 → 选择卖点 → 3个方向 → 最终拍摄脚本 → 单页拍摄分镜总览")
 
 # --------------------------------------------------------
 # ① 产品
@@ -929,6 +815,39 @@ if analysis_result:
                         "",
                     )
                 )
+
+                subtitle_segments = video.get(
+                    "subtitle_segments",
+                    [],
+                )
+                actual_duration = video.get(
+                    "actual_duration_seconds",
+                    "",
+                )
+
+                if subtitle_segments:
+                    st.markdown(
+                        "**完整英 / 西双语字幕时间轴**"
+                    )
+                    if actual_duration not in (None, ""):
+                        st.caption(
+                            f"AI识别原视频实际时长约 {actual_duration} 秒；字幕按原视频完整时长生成，不再按30-40秒截断。"
+                        )
+
+                    subtitle_rows = [
+                        {
+                            "段序": segment.get("segment_no", index + 1),
+                            "时间段": segment.get("time_range", ""),
+                            "English": segment.get("copy_en", ""),
+                            "Español": segment.get("copy_es", ""),
+                        }
+                        for index, segment in enumerate(subtitle_segments)
+                    ]
+                    st.dataframe(
+                        subtitle_rows,
+                        hide_index=True,
+                        use_container_width=True,
+                    )
 
                 strengths = video.get("strengths", [])
                 weaknesses = video.get("weaknesses", [])
@@ -1910,56 +1829,41 @@ if analysis_result:
         )
 
         # ------------------------------------------------
-        # ⑩ 中文分镜图（给拍摄 / 剪辑人员看）
+        # ⑩ 拍摄分镜总览（单页）
         # ------------------------------------------------
-        st.markdown("### ⑩ 中文分镜图（拍摄 / 剪辑执行版）")
+        st.markdown("### ⑩ 拍摄分镜总览（单页拍摄版）")
         st.caption(
-            "每镜一卡，只保留现场最需要看的信息：机位、画面、动作、中文字幕、剪辑提示。"
-            "不是给机器识别，拍摄时可直接按卡片顺序执行。"
+            "一条最终拍摄脚本只生成一张总览；不再拆成多张分镜卡，也不显示剪辑/音效/设计逻辑。"
         )
 
-        _render_storyboard_cards(final_script_result)
+        _render_storyboard_overview(
+            final_script_result,
+            selected_scene=selected_scene,
+            selected_perspective=selected_perspective,
+        )
 
         storyboard_pdf = _build_storyboard_pdf(
             final_script_result,
             product_name=product_name,
-        )
-        storyboard_svg = _build_storyboard_svg(
-            final_script_result,
-            product_name=product_name,
+            selected_scene=selected_scene,
+            selected_perspective=selected_perspective,
         )
 
-        pdf_col, svg_col = st.columns([1.35, 1])
-        with pdf_col:
-            if storyboard_pdf:
-                st.download_button(
-                    "下载中文分镜图（PDF｜手机推荐）",
-                    data=storyboard_pdf,
-                    file_name=(
-                        "TikTok中文分镜图_"
-                        + datetime.now().strftime("%Y%m%d_%H%M")
-                        + ".pdf"
-                    ),
-                    mime="application/pdf",
-                    type="primary",
-                    use_container_width=True,
-                )
-            else:
-                st.caption("PDF组件尚未安装，SVG仍可正常使用。")
-
-        with svg_col:
-            if storyboard_svg:
-                st.download_button(
-                    "下载SVG大图（备用）",
-                    data=storyboard_svg,
-                    file_name=(
-                        "TikTok中文分镜图_"
-                        + datetime.now().strftime("%Y%m%d_%H%M")
-                        + ".svg"
-                    ),
-                    mime="image/svg+xml",
-                    use_container_width=True,
-                )
+        if storyboard_pdf:
+            st.download_button(
+                "下载拍摄分镜总览（PDF｜单页）",
+                data=storyboard_pdf,
+                file_name=(
+                    "TikTok拍摄分镜总览_"
+                    + datetime.now().strftime("%Y%m%d_%H%M")
+                    + ".pdf"
+                ),
+                mime="application/pdf",
+                type="primary",
+                use_container_width=True,
+            )
+        else:
+            st.caption("PDF组件尚未安装，请确认 requirements.txt 中包含 reportlab。")
 
 # --------------------------------------------------------
 # 页面状态与“工作记录”自动保存
