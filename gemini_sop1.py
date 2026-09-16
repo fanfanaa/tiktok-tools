@@ -7,7 +7,7 @@ from pathlib import Path
 from google.genai import types
 
 from config import SOP1_MODEL_CHAIN, MAX_COMPARE_VIDEOS, INLINE_BATCH_MAX_MB, SCENE_LIBRARY
-from common import clean_text, parse_json_output
+from common import clean_text
 from gemini_base import generate_resilient as _base_generate_resilient, wait_until_active
 from sop1_schema import (
     DIRECTIONS_SCHEMA,
@@ -27,6 +27,63 @@ def generate_resilient(client, contents, config):
         config,
         model_chain=SOP1_MODEL_CHAIN,
     )
+
+
+def _parse_json_flexible(raw_text):
+    """尽量稳健地解析 Gemini JSON；兼容偶发代码围栏/前后说明。"""
+    if raw_text is None:
+        raise ValueError("AI未返回有效结果。")
+
+    text = str(raw_text).strip().lstrip("\ufeff")
+    if not text:
+        raise ValueError("AI未返回有效结果。")
+
+    # 1) 标准 JSON
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # 2) 偶发 ```json ... ```
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].lstrip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+    # 3) 偶发 JSON 前后夹带一句解释，只截取最外层对象
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        candidate = text[start:end + 1]
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+
+    raise ValueError("AI返回JSON格式异常。")
+
+
+def _run_json_step(client, contents, config, step_name):
+    """模型成功但 JSON 偶发损坏时，自动重跑一次，而不是整项任务直接失败。"""
+    last_exc = None
+    last_meta = {}
+    for parse_attempt in range(2):
+        response, meta = generate_resilient(client, contents, config)
+        last_meta = meta
+        try:
+            return _parse_json_flexible(response.text), meta
+        except Exception as exc:
+            last_exc = exc
+            if parse_attempt == 0:
+                continue
+    raise RuntimeError(f"{step_name}返回格式异常，系统已自动重试仍未恢复：{last_exc}") from last_exc
 
 
 def _scene_description(scene_name):
@@ -346,15 +403,15 @@ def analyze_videos(client, uploaded_videos, category, product_name, input_sellin
                 "不要在本次响应中生成完整字幕时间轴。"
             ),
             thinking_config=_thinking(),
-            max_output_tokens=5200,
+            max_output_tokens=6500,
             response_mime_type="application/json",
         )
-        response, analysis_meta = generate_resilient(
+        result, analysis_meta = _run_json_step(
             client,
             analysis_content,
             analysis_config,
+            "爆款结构分析",
         )
-        result = parse_json_output(response.text)
 
         # 第2步：每条视频单独生成完整英/西双语字幕。
         # 使用独立、很小的Schema，长视频也不会把主分析Schema撑爆。
@@ -381,16 +438,24 @@ def analyze_videos(client, uploaded_videos, category, product_name, input_sellin
                     "1分钟以上也不得在30-40秒提前结束。"
                 ),
                 thinking_config=_thinking(),
-                max_output_tokens=6000,
+                max_output_tokens=6500,
                 response_mime_type="application/json",
             )
-            subtitle_response, subtitle_meta = generate_resilient(
-                client,
-                subtitle_content,
-                subtitle_config,
-            )
-            subtitle_result = parse_json_output(subtitle_response.text)
-            subtitle_calls.append(subtitle_meta)
+            subtitle_result = None
+            subtitle_meta = {}
+            subtitle_error = None
+            try:
+                subtitle_result, subtitle_meta = _run_json_step(
+                    client,
+                    subtitle_content,
+                    subtitle_config,
+                    f"视频{index}英西双语字幕",
+                )
+                subtitle_calls.append(subtitle_meta)
+            except Exception as exc:
+                # 字幕属于增强结果：单条字幕失败不能让整次爆款拆解全部作废。
+                # 主分析照常返回，便于用户继续工作；metadata 会记录失败数量。
+                subtitle_error = str(exc)
 
             target = None
             for video_result in analyzed_videos:
@@ -403,19 +468,31 @@ def analyze_videos(client, uploaded_videos, category, product_name, input_sellin
             if target is None and index - 1 < len(analyzed_videos):
                 target = analyzed_videos[index - 1]
             if target is not None:
-                target["actual_duration_seconds"] = subtitle_result.get(
-                    "actual_duration_seconds", ""
-                )
-                target["subtitle_segments"] = subtitle_result.get(
-                    "subtitle_segments", []
-                )
+                if subtitle_result:
+                    target["actual_duration_seconds"] = subtitle_result.get(
+                        "actual_duration_seconds", ""
+                    )
+                    target["subtitle_segments"] = subtitle_result.get(
+                        "subtitle_segments", []
+                    )
+                    target["subtitle_status"] = "ok"
+                else:
+                    target.setdefault("actual_duration_seconds", "")
+                    target.setdefault("subtitle_segments", [])
+                    target["subtitle_status"] = "failed"
+                    target["subtitle_error"] = subtitle_error or "字幕生成未完成"
 
-        # 仍沿用主分析调用的模型信息；附带字幕调用次数，方便排查。
+        # 仍沿用主分析调用的模型信息；字幕失败不会拖垮整次分析。
+        subtitle_failed_count = sum(
+            1 for item in analyzed_videos
+            if item.get("subtitle_status") == "failed"
+        )
         return result, {
             "analysis_mode": analysis_mode,
             "total_size_mb": round(total_mb, 2),
             "video_count": len(uploaded_videos),
             "subtitle_call_count": len(subtitle_calls),
+            "subtitle_failed_count": subtitle_failed_count,
             "analysis_seconds": round(time.perf_counter() - started, 1),
             **analysis_meta,
         }
