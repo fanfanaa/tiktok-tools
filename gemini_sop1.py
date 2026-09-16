@@ -10,8 +10,6 @@ from config import SOP1_MODEL_CHAIN, MAX_COMPARE_VIDEOS, INLINE_BATCH_MAX_MB, SC
 from common import clean_text, parse_json_output
 from gemini_base import generate_resilient as _base_generate_resilient, wait_until_active
 from sop1_schema import (
-    VIDEO_ANALYSIS_SCHEMA,
-    SUBTITLE_TIMELINE_SCHEMA,
     DIRECTIONS_SCHEMA,
     FINAL_SCRIPT_SCHEMA,
 )
@@ -105,7 +103,46 @@ suggested_mode只是推荐，最终决定权属于使用人。
 最后推荐 recommended_reference_video_index，但只是AI推荐，最终由使用人选择。
 
 禁止虚构产品功能、TikTok后台数据、销量、认证、医疗效果；禁止复制原视频完整台词。
-严格按JSON Schema输出。
+
+只返回合法 JSON，不要 Markdown、不要代码围栏、不要额外解释。根对象固定为：
+{
+  "comparison_summary": {
+    "one_sentence_core": "",
+    "common_script_route": "",
+    "common_audience": "",
+    "age_estimate": "",
+    "common_hook_pattern": "",
+    "visual_rhythm": "",
+    "common_strengths": [""],
+    "common_weaknesses": [""],
+    "top_absorb_points": ["", "", ""],
+    "key_differences": ""
+  },
+  "common_inferred_selling_points": [""],
+  "recommended_reference_video_index": 1,
+  "videos": [
+    {
+      "video_index": 1,
+      "filename": "",
+      "one_sentence_core": "",
+      "inferred_selling_points": [""],
+      "script_route": "",
+      "audience_profile": "",
+      "age_estimate": "",
+      "first_3s_hook": "",
+      "visual_rhythm": "",
+      "strengths": [""],
+      "weaknesses": [""],
+      "top_absorb_points": ["", "", ""],
+      "fit_reason": "",
+      "recommend_score": 0,
+      "selling_point_relation": "",
+      "selling_point_relation_reason": "",
+      "blended_selling_points": "",
+      "suggested_mode": ""
+    }
+  ]
+}
 """.strip()
 
 
@@ -128,9 +165,20 @@ def build_subtitle_timeline_prompt(filename):
 - copy_en：自然美国英语，适合TikTok屏幕字幕/口播，可直接给剪辑使用。
 - copy_es：与同段英文表达同一核心意思，使用自然、简洁的拉美西班牙语，面向美国西语受众，不做生硬逐词翻译。
 - 如果原视频没有口播/原字幕，也根据该时间段真实画面和脚本意图生成“可剪字幕稿”，但禁止虚构产品不存在的功能。
-- 不要输出优缺点、卖点分析、脚本诊断或其他内容，只输出Schema要求的字幕时间轴。
+- 不要输出优缺点、卖点分析、脚本诊断或其他内容。
 
-严格按JSON Schema输出。
+只返回合法 JSON，不要 Markdown、不要代码围栏、不要额外解释。固定格式：
+{
+  "actual_duration_seconds": 0,
+  "subtitle_segments": [
+    {
+      "segment_no": 1,
+      "time_range": "0.0-3.2s",
+      "copy_en": "",
+      "copy_es": ""
+    }
+  ]
+}
 """.strip()
 
 
@@ -300,7 +348,6 @@ def analyze_videos(client, uploaded_videos, category, product_name, input_sellin
             thinking_config=_thinking(),
             max_output_tokens=5200,
             response_mime_type="application/json",
-            response_json_schema=VIDEO_ANALYSIS_SCHEMA,
         )
         response, analysis_meta = generate_resilient(
             client,
@@ -336,7 +383,6 @@ def analyze_videos(client, uploaded_videos, category, product_name, input_sellin
                 thinking_config=_thinking(),
                 max_output_tokens=6000,
                 response_mime_type="application/json",
-                response_json_schema=SUBTITLE_TIMELINE_SCHEMA,
             )
             subtitle_response, subtitle_meta = generate_resilient(
                 client,
