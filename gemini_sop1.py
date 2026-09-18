@@ -97,6 +97,44 @@ def build_video_analysis_prompt(category, product_name, filenames, input_selling
     file_lines = "\n".join(
         f"视频{i + 1}：{filename}" for i, filename in enumerate(filenames)
     )
+    output_example = {
+        "comparison_summary": {
+            "one_sentence_core": "",
+            "common_script_route": "",
+            "common_audience": "",
+            "age_estimate": "",
+            "common_hook_pattern": "",
+            "visual_rhythm": "",
+            "common_strengths": [""],
+            "common_weaknesses": [""],
+            "top_absorb_points": ["", "", ""],
+            "key_differences": "",
+        },
+        "common_inferred_selling_points": [""],
+        "recommended_reference_video_index": 1,
+        "videos": [
+            {
+                "video_index": 1,
+                "filename": "",
+                "one_sentence_core": "",
+                "inferred_selling_points": [""],
+                "script_route": "",
+                "audience_profile": "",
+                "age_estimate": "",
+                "first_3s_hook": "",
+                "visual_rhythm": "",
+                "strengths": [""],
+                "weaknesses": [""],
+                "top_absorb_points": ["", "", ""],
+                "fit_reason": "",
+                "recommend_score": 0,
+                "selling_point_relation": "",
+                "selling_point_relation_reason": "",
+                "blended_selling_points": "",
+                "suggested_mode": "",
+            }
+        ],
+    }
 
     return f"""
 你是美国 TikTok Shop 爆款短视频分析负责人。
@@ -162,49 +200,23 @@ suggested_mode只是推荐，最终决定权属于使用人。
 禁止虚构产品功能、TikTok后台数据、销量、认证、医疗效果；禁止复制原视频完整台词。
 
 只返回合法 JSON，不要 Markdown、不要代码围栏、不要额外解释。根对象固定为：
-{
-  "comparison_summary": {
-    "one_sentence_core": "",
-    "common_script_route": "",
-    "common_audience": "",
-    "age_estimate": "",
-    "common_hook_pattern": "",
-    "visual_rhythm": "",
-    "common_strengths": [""],
-    "common_weaknesses": [""],
-    "top_absorb_points": ["", "", ""],
-    "key_differences": ""
-  },
-  "common_inferred_selling_points": [""],
-  "recommended_reference_video_index": 1,
-  "videos": [
-    {
-      "video_index": 1,
-      "filename": "",
-      "one_sentence_core": "",
-      "inferred_selling_points": [""],
-      "script_route": "",
-      "audience_profile": "",
-      "age_estimate": "",
-      "first_3s_hook": "",
-      "visual_rhythm": "",
-      "strengths": [""],
-      "weaknesses": [""],
-      "top_absorb_points": ["", "", ""],
-      "fit_reason": "",
-      "recommend_score": 0,
-      "selling_point_relation": "",
-      "selling_point_relation_reason": "",
-      "blended_selling_points": "",
-      "suggested_mode": ""
-    }
-  ]
-}
+{json.dumps(output_example, ensure_ascii=False, indent=2)}
 """.strip()
 
 
-
 def build_subtitle_timeline_prompt(filename):
+    output_example = {
+        "actual_duration_seconds": 0,
+        "subtitle_segments": [
+            {
+                "segment_no": 1,
+                "time_range": "0.0-3.2s",
+                "copy_en": "",
+                "copy_es": "",
+            }
+        ],
+    }
+
     return f"""
 你正在为中国 TikTok Shop 剪辑团队生成一条原始参考视频的完整双语字幕时间轴。
 
@@ -225,17 +237,7 @@ def build_subtitle_timeline_prompt(filename):
 - 不要输出优缺点、卖点分析、脚本诊断或其他内容。
 
 只返回合法 JSON，不要 Markdown、不要代码围栏、不要额外解释。固定格式：
-{
-  "actual_duration_seconds": 0,
-  "subtitle_segments": [
-    {
-      "segment_no": 1,
-      "time_range": "0.0-3.2s",
-      "copy_en": "",
-      "copy_es": ""
-    }
-  ]
-}
+{json.dumps(output_example, ensure_ascii=False, indent=2)}
 """.strip()
 
 
