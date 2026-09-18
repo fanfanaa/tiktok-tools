@@ -540,7 +540,7 @@ def generate_directions(
         response_json_schema=DIRECTIONS_SCHEMA,
     )
     response, meta = generate_resilient(client, prompt, config)
-    result = parse_json_output(response.text)
+    result = _parse_json_flexible(response.text)
     return result, {"analysis_seconds": round(time.perf_counter() - started, 1), **meta}
 
 
@@ -576,5 +576,5 @@ def generate_final_script(
         response_json_schema=FINAL_SCRIPT_SCHEMA,
     )
     response, meta = generate_resilient(client, prompt, config)
-    result = parse_json_output(response.text)
+    result = _parse_json_flexible(response.text)
     return result, {"analysis_seconds": round(time.perf_counter() - started, 1), **meta}
