@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+import traceback
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, Callable
@@ -42,7 +43,18 @@ def submit_background_task(
             if not future.done():
                 return False
 
-        future = _EXECUTOR.submit(fn, *args, **kwargs)
+        def _runner():
+            print(f"[BG TASK START] {key}", flush=True)
+            try:
+                result = fn(*args, **kwargs)
+                print(f"[BG TASK DONE] {key}", flush=True)
+                return result
+            except Exception:
+                print(f"[BG TASK ERROR] {key}", flush=True)
+                traceback.print_exc()
+                raise
+
+        future = _EXECUTOR.submit(_runner)
         _TASKS[key] = {
             "future": future,
             "context": dict(context or {}),

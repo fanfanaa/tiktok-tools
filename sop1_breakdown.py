@@ -317,6 +317,58 @@ client = create_client(api_key) if api_key else None
 SOP1_ANALYSIS_TASK_KEY = task_key("sop1_video_analysis")
 SOP1_DIRECTIONS_TASK_KEY = task_key("sop1_directions")
 SOP1_FINAL_TASK_KEY = task_key("sop1_final_script")
+
+
+def _create_background_client(api_key_value):
+    """后台线程自己创建 Gemini client，避免跨线程复用主页面 client。"""
+    if not api_key_value:
+        raise RuntimeError("后台任务缺少 Gemini API Key。")
+    return create_client(api_key_value)
+
+
+def _run_analysis_background(api_key_value, task_videos, task_category, task_product_name, task_selling_points):
+    bg_client = _create_background_client(api_key_value)
+    return analyze_videos(
+        bg_client,
+        task_videos,
+        task_category,
+        task_product_name,
+        task_selling_points,
+    )
+
+
+def _run_directions_background(
+    api_key_value, task_category, task_product_name, task_summary, task_reference_video,
+    task_input_selling_points, task_effective_selling_points, task_selling_point_mode,
+):
+    bg_client = _create_background_client(api_key_value)
+    return generate_directions(
+        bg_client,
+        task_category,
+        task_product_name,
+        task_summary,
+        task_reference_video,
+        task_input_selling_points,
+        task_effective_selling_points,
+        task_selling_point_mode,
+    )
+
+
+def _run_final_background(
+    api_key_value, task_category, task_product_name, task_reference_video,
+    task_effective_selling_points, task_direction, task_scene, task_perspective,
+):
+    bg_client = _create_background_client(api_key_value)
+    return generate_final_script(
+        bg_client,
+        task_category,
+        task_product_name,
+        task_reference_video,
+        task_effective_selling_points,
+        task_direction,
+        task_scene,
+        task_perspective,
+    )
 if not api_key:
     st.error("系统未配置 Gemini API Key，请联系管理员。")
 
@@ -557,8 +609,8 @@ if analyze_button:
     task_videos = get_retained_uploads(SOP1_PAGE_ID, "benchmark") or uploaded_videos
     submitted = submit_background_task(
         SOP1_ANALYSIS_TASK_KEY,
-        analyze_videos,
-        client, task_videos, category, product_name, input_selling_points,
+        _run_analysis_background,
+        api_key, task_videos, category, product_name, input_selling_points,
         context={
             "input_signature": st.session_state.get("video_batch_signature", ""),
             "role": st.session_state.get("role", ""),
@@ -572,6 +624,11 @@ if analyze_button:
         },
     )
     if submitted:
+        print(
+            f"[SOP1 SUBMIT] videos={len(task_videos)} size_mb="
+            f"{sum(len(v.getvalue()) for v in task_videos) / 1024 / 1024:.2f}",
+            flush=True,
+        )
         st.rerun()
     else:
         st.info("这项爆款解析已经在后台运行，无需重复提交。")
@@ -1348,8 +1405,8 @@ if analysis_result:
     if generate_direction_button:
         submitted = submit_background_task(
             SOP1_DIRECTIONS_TASK_KEY,
-            generate_directions,
-            client, category, product_name, summary, chosen_ref_video,
+            _run_directions_background,
+            api_key, category, product_name, summary, chosen_ref_video,
             input_selling_points, effective_selling_points, selling_point_mode,
             context={
                 "direction_context": current_direction_context,
@@ -1720,8 +1777,8 @@ if analysis_result:
             if generate_script_button:
                 submitted = submit_background_task(
                     SOP1_FINAL_TASK_KEY,
-                    generate_final_script,
-                    client, category, product_name, chosen_ref_video, effective_selling_points,
+                    _run_final_background,
+                    api_key, category, product_name, chosen_ref_video, effective_selling_points,
                     chosen_direction, selected_scene, selected_perspective,
                     context={
                         "final_context": current_final_context,
